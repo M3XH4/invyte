@@ -1,11 +1,22 @@
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
+import SplashScreen  from './getting-started';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
 
 export default function Index() {
-  const isFirstTime = true; // later: replace with AsyncStorage
+  const [loading, setLoading] = useState(true);
+  const [firstTime, setFirstTime] = useState(false);
 
-  if (isFirstTime) {
-    return <Redirect href="/getting-started" />;
-  }
+  useEffect(() => {
+    AsyncStorage.getItem('seenOnboarding').then(value => {
+      setFirstTime(!value);
+      setLoading(false);
+    });
+  }, []);
 
-  return <Redirect href="/tabs/index" />;
+  if (loading) return null;
+  
+  return firstTime
+    ? <SplashScreen onContinue={() => router.replace('/onboarding')} />
+    : <Redirect href="/tabs" />
 }
