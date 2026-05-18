@@ -1,22 +1,38 @@
-import { Redirect, router } from 'expo-router';
-import SplashScreen  from './getting-started';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { Redirect, router } from "expo-router";
+import SplashScreen from "./getting-started";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useState } from "react";
+import { useFonts } from "expo-font";
 
+import "../global.css";
 export default function Index() {
-  const [loading, setLoading] = useState(true);
-  const [firstTime, setFirstTime] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFirstTime, setIsFirstTime] = useState(false);
+
+  const [fontsLoaded] = useFonts({
+    PoppinsRegular: require("@/assets/fonts/Poppins-Regular.ttf"),
+    PoppinsBold: require("@/assets/fonts/Poppins-Bold.ttf"),
+    PoppinsSemiBold: require("@/assets/fonts/Poppins-SemiBold.ttf"),
+  });
 
   useEffect(() => {
-    AsyncStorage.getItem('seenOnboarding').then(value => {
-      setFirstTime(!value);
-      setLoading(false);
-    });
+    const checkFirstTime = async () => {
+      const hasSeenOnboarding = await AsyncStorage.getItem('hasSeenOnboarding');
+
+      setIsFirstTime(!hasSeenOnboarding);
+      setIsLoading(false);
+    };
+
+    checkFirstTime();
   }, []);
 
-  if (loading) return null;
+
+  if (isLoading) return null;
+  if (!fontsLoaded) return null;
   
-  return firstTime
-    ? <SplashScreen onContinue={() => router.replace('/onboarding')} />
-    : <Redirect href="/tabs" />
+  return isFirstTime ? (
+    <SplashScreen onContinue={() => router.replace("/onboarding")} />
+  ) : (
+    <Redirect href="/tabs" />
+  );
 }

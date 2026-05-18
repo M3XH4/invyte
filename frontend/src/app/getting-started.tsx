@@ -97,7 +97,7 @@ export default function GettingStartedScreen({ onContinue }: { onContinue: () =>
       >
         <Image
           source={invyteLogo}
-          className="w-64 h-28 mb-3"
+          className="w-64 h-45 mb-1"
           resizeMode="contain"
         />
 
@@ -105,7 +105,8 @@ export default function GettingStartedScreen({ onContinue }: { onContinue: () =>
           from={{ opacity: 0, translateY: 10 }}
           animate={{ opacity: 1, translateY: 0 }}
           transition={{ delay: 400 }}
-          className="text-white text-sm font-bold tracking-wide text-center"
+          className="text-white text-md tracking-wide text-center"
+          style={{ fontFamily: 'PoppinsSemiBold' }}
         >
           Make every invite an adventure!
         </MotiText>
@@ -122,7 +123,7 @@ export default function GettingStartedScreen({ onContinue }: { onContinue: () =>
             loop: true,
             repeatReverse: true,
           }}
-          className="w-full h-[420px]"
+          className="w-full h-[340px]"
           resizeMode="contain"
         />
       </View>
@@ -136,8 +137,8 @@ export default function GettingStartedScreen({ onContinue }: { onContinue: () =>
           loop: true,
           repeatReverse: true,
         }}
-        style={{ bottom: 24 + insets.bottom }}
-        className="absolute self-center text-white/80 text-sm font-semibold"
+        style={{ bottom: 24 + insets.bottom, fontFamily: 'PoppinsBold' }}
+        className="absolute self-center text-white/80 text-sm"
       >
         Tap to continue
       </MotiText>
