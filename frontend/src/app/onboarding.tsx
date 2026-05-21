@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Image, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { MotiImage, MotiText, MotiView } from "moti";
@@ -232,7 +232,7 @@ export default function OnboardingScreen() {
 
   const finishOnboarding = async () => {
     await AsyncStorage.setItem('hasSeenOnboarding', 'true');
-    router.replace('/tabs');
+    router.replace('/auth-login');
   };
   const handleNext = async () => {
     if (currentStep < onboardingSteps.length - 1) {

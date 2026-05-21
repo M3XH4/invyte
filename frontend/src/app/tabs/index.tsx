@@ -1,98 +1,411 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useMemo } from 'react';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Bell, Calendar, ChevronRight, Clock, MapPin, Users } from 'lucide-react-native';
+import { MotiView } from 'moti';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useScreenTheme } from '@/hooks/use-screen-theme';
+const heroCardImage = require('@/assets/images/hero-card-image.png');
+const birthdayTransIcon = require('@/assets/images/transparent-birthday-icon.png');
+const weddingTransIcon = require('@/assets/images/transparent-wedding-icon.png');
+const partyTransIcon = require('@/assets/images/transparent-party-icon.png');
+const meetingTransIcon = require('@/assets/images/transparent-meeting-icon.png');
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+type EventItem = {
+  id: number | string;
+  title: string;
+  date: string;
+  dateISO: string;
+  time: string;
+  location: string;
+  attendees: number;
+  image?: any;
+};
+
+const fallbackCategories = [
+  { id: 'birthday', name: 'Birthday', icon: birthdayTransIcon, colors: ['#f472b6', '#db2777'] },
+  { id: 'wedding', name: 'Wedding', icon: weddingTransIcon, colors: ['#c084fc', '#9333ea'] },
+  { id: 'party', name: 'Party', icon: partyTransIcon, colors: ['#fb923c', '#ea580c'] },
+  { id: 'meeting', name: 'Meeting', icon: meetingTransIcon, colors: ['#22d3ee', '#0891b2'] },
+];
+
+const fallbackEvents: EventItem[] = [
+  {
+    id: 'fallback-1',
+    title: 'No upcoming events yet',
+    date: 'Create your first event',
+    dateISO: new Date().toISOString(),
+    time: '',
+    location: 'Start planning something fun!',
+    attendees: 0,
+  },
+];
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const theme = useScreenTheme();
+
+  const categories = fallbackCategories;
+
+  const upcomingEvents: EventItem[] = [];
+
+  const notificationsCount = 0;
+
+  const safeUpcomingEvents =
+    upcomingEvents.length > 0 ? upcomingEvents : fallbackEvents;
+
+  const latestUpcomingEvent = useMemo(() => {
+    if (upcomingEvents.length === 0) return null;
+
+    return [...upcomingEvents].sort(
+      (a, b) =>
+        new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime()
+    )[0];
+  }, [upcomingEvents]);
+
+  const calculateDaysUntil = (eventDate: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const event = new Date(eventDate);
+    event.setHours(0, 0, 0, 0);
+
+    const diffTime = event.getTime() - today.getTime();
+    return Math.max(Math.ceil(diffTime / (1000 * 60 * 60 * 24)), 0);
+  };
+
+  const heroTitle = latestUpcomingEvent?.title ?? 'Create Your First Event';
+  const heroDate = latestUpcomingEvent
+    ? `${latestUpcomingEvent.date} • ${latestUpcomingEvent.time}`
+    : 'Start your adventure today';
+  const heroLocation =
+    latestUpcomingEvent?.location ?? 'Plan, invite, and celebrate';
+  const heroAttendees = latestUpcomingEvent?.attendees ?? 0;
+  const heroDays = latestUpcomingEvent
+    ? calculateDaysUntil(latestUpcomingEvent.dateISO)
+    : 0;
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <LinearGradient
+      colors={theme.pageGradient}
+      className="flex-1"
+    >
+      <View className={`absolute right-10 top-20 h-64 w-64 rounded-full ${theme.pageGlowOne}`} />
+      <View className={`absolute left-5 top-60 h-56 w-56 rounded-full ${theme.pageGlowTwo}`} />
+      <View className={`absolute bottom-40 right-8 h-48 w-48 rounded-full ${theme.pageGlowThree}`} />
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingTop: insets.top + 24,
+          paddingBottom: insets.bottom + 130,
+        }}
+      >
+        <View className="px-6">
+          {/* Header */}
+          <View className="mb-6 flex-row items-center justify-between">
+            <View className="flex-row items-center gap-4">
+              <Pressable
+                onPress={() => router.push('/tabs/profile')}
+                className="relative"
+              >
+                <Image
+                  source={{
+                    uri: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjGZJiVjkYNcKy7wX1h1Rz-5Hjgn6wn4S9Jw&s',
+                  }}
+                  className="h-14 w-14 rounded-full"
+                />
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+                <View className="absolute bottom-0 right-0 h-4 w-4 rounded-full border-2 border-white bg-green-500" />
+              </Pressable>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+              <View>
+                <Text className={`text-2xl font-black ${theme.headerText}`}>
+                  Hey Argyle!
+                </Text>
+                <Text className={`text-sm ${theme.subText}`}>
+                  Ready to make today unforgettable?
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={() => router.push('/notifications')}
+              className={`relative h-12 w-12 items-center justify-center rounded-2xl border shadow-sm ${theme.iconButton}`}
+            >
+              <Bell color={theme.iconColor} size={20} />
+
+              {notificationsCount > 0 && (
+                <View className="absolute -right-1 -top-1 h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-pink-500">
+                  <Text className="text-[9px] font-bold text-white">
+                    {notificationsCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+
+          {/* Hero Card */}
+          <MotiView
+            from={{ opacity: 0, translateY: 20 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 500 }}
+            className="mb-6 overflow-hidden rounded-[28px] shadow-2xl"
+          >
+            <Pressable
+              onPress={() =>
+                latestUpcomingEvent
+                  ? router.push('/event-management')
+                  : router.push('/create-event-categories')
+              }
+            >
+              <LinearGradient
+                colors={['#a855f7', '#9333ea', '#db2777']}
+                className="relative h-[240px] w-full overflow-hidden rounded-[28px]"
+              >
+                <View className="absolute -right-10 -top-10 h-48 w-48 rounded-full bg-pink-400/30" />
+                <View className="absolute -bottom-10 -left-10 h-40 w-40 rounded-full bg-blue-400/20" />
+
+                <Image
+                  source={heroCardImage}
+                  className="absolute right-1 top-9 h-[180px] w-[145px]"
+                  resizeMode="contain"
+                />
+
+                {latestUpcomingEvent && (
+                  <View className="absolute right-5 top-5 z-10 rounded-2xl border border-white/40 bg-white/20 px-3 py-2">
+                    <Text className="text-center text-2xl font-black leading-none text-white">
+                      {heroDays}
+                    </Text>
+
+                    <Text className="text-[10px] font-bold uppercase text-white/80">
+                      Days Left
+                    </Text>
+                  </View>
+                )}
+
+                <View className="absolute left-5 top-6 z-10 w-[170px]">
+                  <View className="mb-2 self-start rounded-full bg-white/25 px-3 py-1">
+                    <Text className="text-[11px] font-black text-white">
+                      {latestUpcomingEvent ? 'UPCOMING EVENT' : 'GET STARTED'}
+                    </Text>
+                  </View>
+
+                  <Text
+                    numberOfLines={2}
+                    className="mb-3 text-[26px] font-black leading-[30px] text-white"
+                  >
+                    {heroTitle}
+                  </Text>
+
+                  <View className="mb-2 flex-row items-start gap-2">
+                    <Calendar color="white" size={14} strokeWidth={2.5} />
+                    <Text className="flex-1 text-xs font-bold text-white">
+                      {heroDate}
+                    </Text>
+                  </View>
+
+                  <View className="mb-2 flex-row items-start gap-2">
+                    <MapPin color="white" size={14} strokeWidth={2.5} />
+                    <Text
+                      numberOfLines={1}
+                      className="flex-1 text-xs font-bold text-white"
+                    >
+                      {heroLocation}
+                    </Text>
+                  </View>
+
+                  <View className="mb-5 flex-row items-start gap-2">
+                    <Users color="white" size={14} strokeWidth={2.5} />
+                    <Text className="text-xs font-bold text-white">
+                      {heroAttendees} attending
+                    </Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  onPress={() =>
+                    latestUpcomingEvent
+                      ? router.push('/event-management')
+                      : router.push('/create-event-categories')
+                  }
+                  className={`absolute bottom-3 left-5 z-20 h-[38px] flex-row items-center justify-center gap-1 rounded-full px-4 ${theme.surface}`}
+                >
+                  <Text className={`text-xs font-black ${theme.isDarkMode ? 'text-fuchsia-200' : 'text-purple-700'}`}>
+                    {latestUpcomingEvent ? 'View Event' : 'Create Event'}
+                  </Text>
+                  <ChevronRight color={theme.isDarkMode ? '#f5d0fe' : '#7e22ce'} size={14} strokeWidth={3} />
+                </Pressable>
+              </LinearGradient>
+            </Pressable>
+          </MotiView>
+
+          {/* Categories */}
+          <View className="mb-6">
+            <View className="mb-4 flex-row items-center justify-between">
+              <Text className={`text-xl font-black ${theme.headerText}`}>
+                Categories
+              </Text>
+
+              <Pressable
+                onPress={() => router.push('/create-event-categories')}
+                className="flex-row items-center"
+              >
+                <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-fuchsia-300' : 'text-purple-600'}`}>
+                  See All
+                </Text>
+                <ChevronRight color="#9333ea" size={16} />
+              </Pressable>
+            </View>
+
+            <View className="flex-row gap-3">
+              {categories.map((category, index) => (
+                <MotiView
+                  key={category.id}
+                  from={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: index * 100, duration: 300 }}
+                  className="flex-1"
+                >
+                  <Pressable
+                    onPress={() =>
+                      router.push(`/create-event-details?category=${category.id}`)
+                    }
+                    className="items-center"
+                  >
+                    <LinearGradient
+                      colors={category.colors as [string, string]}
+                      className="mb-2 aspect-square w-full items-center justify-center p-3"
+                      style={{ borderRadius: 12 }}
+                    >
+                      <Image
+                        source={category.icon}
+                        className="h-full w-full"
+                        resizeMode="contain"
+                      />
+                    </LinearGradient>
+
+                    <Text className={`text-xs font-bold ${theme.textOnSurfaceSecondary}`}>
+                      {category.name}
+                    </Text>
+                  </Pressable>
+                </MotiView>
+              ))}
+            </View>
+          </View>
+
+          {/* Upcoming Events */}
+          <View className="mb-6">
+            <View className="mb-4 flex-row items-center justify-between">
+              <Text className={`text-xl font-black ${theme.headerText}`}>
+                Upcoming Events
+              </Text>
+
+              <Pressable
+                onPress={() => router.push('/tabs/events')}
+                className="flex-row items-center"
+              >
+                <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-fuchsia-300' : 'text-purple-600'}`}>
+                  See All
+                </Text>
+                <ChevronRight color="#9333ea" size={16} />
+              </Pressable>
+            </View>
+
+            <View className="gap-3">
+              {safeUpcomingEvents.map((event, index) => {
+                const isFallback = event.id === 'fallback-1';
+
+                return (
+                  <MotiView
+                    key={event.id}
+                    from={{ opacity: 0, translateX: -20 }}
+                    animate={{ opacity: 1, translateX: 0 }}
+                    transition={{ delay: index * 100, duration: 400 }}
+                  >
+                    <Pressable
+                      onPress={() =>
+                        isFallback
+                          ? router.push('/create-event-categories')
+                          : router.push('/event-management')
+                      }
+                      className={`rounded-2xl border p-4 shadow-sm ${theme.surface}`}
+                    >
+                      <View className="flex-row items-start gap-3">
+                        <View className="h-14 w-14 items-center justify-center overflow-hidden rounded-xl bg-purple-100">
+                          {event.image ? (
+                            <Image
+                              source={event.image}
+                              className="h-full w-full"
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Calendar color="#9333ea" size={26} />
+                          )}
+                        </View>
+
+                        <View className="min-w-0 flex-1">
+                          <Text
+                            numberOfLines={1}
+                            className={`mb-1 text-base font-bold ${theme.textOnSurface}`}
+                          >
+                            {event.title}
+                          </Text>
+
+                          <View className="mb-1 flex-row items-center gap-2">
+                            <Clock color={theme.chevronColor} size={14} />
+                            <Text className={`text-xs ${theme.textOnSurfaceSecondary}`}>
+                              {isFallback
+                                ? event.date
+                                : `${event.date} • ${event.time}`}
+                            </Text>
+                          </View>
+
+                          <View className="flex-row items-center gap-2">
+                            <MapPin color={theme.chevronColor} size={14} />
+                            <Text
+                              numberOfLines={1}
+                              className={`flex-1 text-xs ${theme.textOnSurfaceSecondary}`}
+                            >
+                              {event.location}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {!isFallback && (
+                          <View className="items-end gap-2">
+                            <LinearGradient
+                              colors={['#a855f7', '#ec4899']}
+                              className="rounded-xl px-3 py-1.5"
+                            >
+                              <View className="flex-row items-center gap-1.5">
+                                <Calendar color="white" size={14} />
+                                <Text className="text-xs font-black text-white">
+                                  {calculateDaysUntil(event.dateISO)}d
+                                </Text>
+                              </View>
+                            </LinearGradient>
+
+                            <View className="flex-row items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-1.5">
+                              <Users color="#2563eb" size={14} />
+                              <Text className="text-xs font-bold text-blue-600">
+                                {event.attendees}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    </Pressable>
+                  </MotiView>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </LinearGradient>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});

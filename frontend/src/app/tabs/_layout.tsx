@@ -5,10 +5,13 @@ import { Home, Calendar, Plus, Users, UserCircle } from "lucide-react-native";
 import { MotiPressable } from "moti/interactions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 function CustomTabBar({ state, navigation }: any) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
+  const isDarkMode = scheme === 'dark';
 
   const tabs = [
     { name: "index", label: "Home", icon: Home },
@@ -30,7 +33,7 @@ function CustomTabBar({ state, navigation }: any) {
       >
         {/* Main FAB */}
         <MotiPressable
-          onPress={() => router.push("/create-event")}
+          onPress={() => router.push("/create-event-categories")}
           animate={({ pressed }) => {
             "worklet";
             return {
@@ -74,10 +77,10 @@ function CustomTabBar({ state, navigation }: any) {
       >
         <BlurView
           intensity={40}
-          tint="light"
-          className="border border-gray-200/50 bg-white/80"
+          tint={isDarkMode ? 'dark' : 'light'}
+          className={`border ${isDarkMode ? 'border-white/10' : 'border-gray-200/50'}`}
         >
-          <View className="h-[68px] flex-row items-center justify-around px-2">
+          <View className={`h-[68px] flex-row items-center justify-around px-2 ${isDarkMode ? 'bg-gray-950/80' : 'bg-white/80'}`}>
             {tabs.slice(0, 2).map((tab) => (
               <TabButton
                 key={tab.name}
@@ -129,7 +132,7 @@ function TabButton({ tab, state, navigation }: any) {
       onPress={onPress}
       className="min-w-[60px] items-center justify-center gap-1"
     >
-      <View className={`p-2 ${isActive ? "bg-purple-100 rounded-xl" : ""}`}>
+      <View className={`p-2 ${isActive ? "rounded-xl bg-purple-100" : ""}`}>
         <Icon
           size={22}
           color={isActive ? "#9333ea" : "#9ca3af"}
