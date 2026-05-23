@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -14,19 +14,27 @@ import {
   Search,
   Send,
   UserPlus,
+  Trash2,
   XCircle,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AddGuestModal from '@/components/add-guest-modal';
+import GuestDetailsModal from '@/components/guest-details-modal';
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { eventStore, useEventStore } from '@/store/eventStore';
+import { guestStore, useGuestStore } from '@/store/guestStore';
+import { safeRun } from '@/utils/safeRun';
+import { normalizeGuestStatus } from '@/utils/rsvpStats';
+import type { EventGuest } from '@/types/guest';
+import type { Event } from '@/types/event';
 
 type GuestStatus = 'going' | 'maybe' | 'pending' | 'not-going';
 type ContactMethod = 'email' | 'whatsapp' | 'messenger' | 'telegram';
 
 type Guest = {
-  id: number;
+  id: string;
   name: string;
   status: GuestStatus;
   avatar: string;
@@ -34,62 +42,17 @@ type Guest = {
   profileImage?: string;
   contactMethod?: ContactMethod;
   contactValue?: string;
+  source?: EventGuest;
 };
 
 type EventItem = {
-  id: number;
+  id: string;
   name: string;
   category: 'birthday' | 'meeting' | 'party';
   categoryColor: [string, string];
   guests: Guest[];
+  source?: Event;
 };
-
-const initialEvents: EventItem[] = [
-//   {
-//     id: 1,
-//     name: "Aryan's Birthday",
-//     category: 'birthday',
-//     categoryColor: ['#f472b6', '#db2777'],
-//     guests: [
-//       {
-//         id: 1,
-//         name: 'Alex Morgan',
-//         status: 'going',
-//         avatar: 'AM',
-//         color: ['#34d399', '#059669'],
-//         contactMethod: 'email',
-//         contactValue: 'alex@example.com',
-//       },
-//       {
-//         id: 2,
-//         name: 'Jordan Lee',
-//         status: 'maybe',
-//         avatar: 'JL',
-//         color: ['#60a5fa', '#2563eb'],
-//         contactMethod: 'whatsapp',
-//         contactValue: '+1 (555) 234-8888',
-//       },
-//       {
-//         id: 3,
-//         name: 'Taylor Swift',
-//         status: 'pending',
-//         avatar: 'TS',
-//         color: ['#c084fc', '#9333ea'],
-//         contactMethod: 'messenger',
-//         contactValue: 'Taylor Swift',
-//       },
-//       {
-//         id: 4,
-//         name: 'Morgan Freeman',
-//         status: 'not-going',
-//         avatar: 'MF',
-//         color: ['#f87171', '#dc2626'],
-//         contactMethod: 'email',
-//         contactValue: 'morgan@example.com',
-//       },
-//     ],
-//   },
-];
 
 const statusConfig: Record<GuestStatus, { label: string; icon: any; bg: string; text: string; border: string }> = {
   going: { label: 'Going', icon: CheckCircle, bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' },
@@ -103,19 +66,64 @@ export default function GuestListScreen() {
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
 
-  const [events, setEvents] = useState<EventItem[]>(initialEvents);
-  const [expandedEvents, setExpandedEvents] = useState<number[]>([1]);
+  const eventState = useEventStore();
+  const guestState = useGuestStore();
+  const [guestActionError, setGuestActionError] = useState('');
+  const [expandedEvents, setExpandedEvents] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [sortBy, setSortBy] = useState<'name' | 'going' | 'pending' | 'recent'>('name');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState(1);
+  const [selectedEventId, setSelectedEventId] = useState('');
   const [newGuestName, setNewGuestName] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<GuestStatus>('pending');
   const [contactMethod, setContactMethod] = useState<ContactMethod>('email');
   const [contactValue, setContactValue] = useState('');
+  const [selectedGuestDetails, setSelectedGuestDetails] = useState<{ guest: EventGuest; event?: Event } | null>(null);
+  const [guestDetailsLoading, setGuestDetailsLoading] = useState(false);
 
-  const allGuests = events.flatMap((event) => event.guests);
+  const events = useMemo(() => {
+    return eventState.events.map((event) => {
+      const eventId = event.uuid || event.id;
+      const guests = (guestState.guestsByEventId[eventId] ?? []).map(mapGuest);
+      return mapEventItem(event, guests);
+    });
+  }, [eventState.events, guestState.guestsByEventId]);
+
+  const loading = eventState.isLoadingInitial && eventState.events.length === 0;
+  const refreshing = eventState.isRefreshing;
+  const error = eventState.error;
+  const refresh = () => eventStore.refreshEvents({ status: 'all', per_page: 50 });
+
+  useEffect(() => {
+    if (eventState.isLoadingInitial || eventState.isRefreshing) return;
+
+    if (events.length === 0) {
+      setSelectedEventId('');
+      setExpandedEvents([]);
+      return;
+    }
+
+    setSelectedEventId((current) =>
+      current && events.some((event) => event.id === current) ? current : events[0]?.id || '',
+    );
+    setExpandedEvents((current) => {
+      const validExpanded = current.filter((id) => events.some((event) => event.id === id));
+      return validExpanded.length > 0 ? validExpanded : [events[0].id];
+    });
+  }, [events, eventState.isLoadingInitial, eventState.isRefreshing]);
+
+  const loadGuestsForEvent = useCallback(async (eventId: string) => {
+    if (!eventId) return;
+    await guestStore.fetchGuests(eventId, { per_page: 100 });
+  }, []);
+
+  useEffect(() => {
+    const firstExpanded = expandedEvents[0];
+    if (firstExpanded) void safeRun(() => loadGuestsForEvent(firstExpanded), 'Unable to load guests.', setGuestActionError);
+  }, [expandedEvents, loadGuestsForEvent]);
+
+  const allGuests = events.flatMap((event) => event.guests ?? []);
 
   const totalStats = {
     going: allGuests.filter((guest) => guest.status === 'going').length,
@@ -128,7 +136,8 @@ export default function GuestListScreen() {
     const query = searchQuery.toLowerCase();
 
     return events.map((event) => {
-      const filteredGuests = event.guests.filter((guest) =>
+      const eventGuests = event.guests ?? [];
+      const filteredGuests = eventGuests.filter((guest) =>
         guest.name.toLowerCase().includes(query),
       );
 
@@ -141,7 +150,7 @@ export default function GuestListScreen() {
           case 'pending':
             return Number(b.status === 'pending') - Number(a.status === 'pending');
           case 'recent':
-            return b.id - a.id;
+            return b.id.localeCompare(a.id);
           default:
             return 0;
         }
@@ -151,65 +160,68 @@ export default function GuestListScreen() {
     });
   }, [events, searchQuery, sortBy]);
 
-  const toggleEvent = (eventId: number) => {
-    setExpandedEvents((prev) =>
-      prev.includes(eventId) ? prev.filter((id) => id !== eventId) : [...prev, eventId],
-    );
-  };
+  const toggleEvent = useCallback((eventId: string) => {
+    setExpandedEvents((prev) => {
+      const willExpand = !prev.includes(eventId);
+      if (willExpand) void safeRun(() => loadGuestsForEvent(eventId), 'Unable to load guests.', setGuestActionError);
+
+      return willExpand ? [...prev, eventId] : prev.filter((id) => id !== eventId);
+    });
+  }, [loadGuestsForEvent]);
 
   const hasEvents = events.length > 0;
 
-  const generateAvatar = (name: string) => {
-    const parts = name.trim().split(' ');
-
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  const handleAddGuest = async () => {
+    if (!selectedEventId) {
+      setGuestActionError('Select an event first.');
+      return;
+    }
+    if (!newGuestName.trim()) {
+      setGuestActionError('Guest name is required.');
+      return;
+    }
+    if (!contactValue.trim()) {
+      setGuestActionError(contactMethod === 'email' ? 'Email is required.' : 'Contact information is required.');
+      return;
     }
 
-    return name.substring(0, 2).toUpperCase();
-  };
-
-  const getRandomColor = (): [string, string] => {
-    const colors: [string, string][] = [
-      ['#34d399', '#059669'],
-      ['#60a5fa', '#2563eb'],
-      ['#c084fc', '#9333ea'],
-      ['#fb923c', '#ea580c'],
-      ['#f472b6', '#db2777'],
-      ['#f87171', '#dc2626'],
-      ['#818cf8', '#4f46e5'],
-      ['#2dd4bf', '#0d9488'],
-    ];
-
-    return colors[Math.floor(Math.random() * colors.length)];
-  };
-
-  const handleAddGuest = () => {
-    if (!newGuestName.trim() || !contactValue.trim()) return;
-
-    const newGuest: Guest = {
-      id: Date.now(),
+    setGuestActionError('');
+    await guestStore.addGuest(selectedEventId, {
       name: newGuestName.trim(),
-      status: selectedStatus,
-      avatar: generateAvatar(newGuestName),
-      color: getRandomColor(),
-      contactMethod,
-      contactValue: contactValue.trim(),
-    };
-
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.id === selectedEventId
-          ? { ...event, guests: [...event.guests, newGuest] }
-          : event,
-      ),
-    );
+      email: contactMethod === 'email' ? contactValue.trim() : undefined,
+      phone_number: contactMethod !== 'email' ? contactValue.trim() : undefined,
+      contact_method: contactMethod,
+      contact_value: contactValue.trim(),
+      response_status: selectedStatus === 'not-going' ? 'not_going' : selectedStatus,
+      invite_status: 'pending',
+    });
 
     setNewGuestName('');
     setSelectedStatus('pending');
     setContactMethod('email');
     setContactValue('');
     setShowAddModal(false);
+  };
+
+  const handleDeleteGuest = async (eventId: string, guestId: string) => {
+    setGuestActionError('');
+    await guestStore.deleteGuest(eventId, guestId);
+  };
+
+  const handleOpenGuestDetails = async (event: EventItem, guest: Guest) => {
+    const sourceGuest = guest.source;
+    if (!sourceGuest) return;
+
+    setSelectedGuestDetails({ guest: sourceGuest, event: event.source });
+    try {
+      setGuestDetailsLoading(true);
+      const detailed = await guestStore.fetchGuestDetails(event.id, sourceGuest.uuid || sourceGuest.id);
+      setSelectedGuestDetails({ guest: detailed, event: event.source });
+    } catch (error: any) {
+      setGuestActionError(error.message || 'Unable to load guest details.');
+    } finally {
+      setGuestDetailsLoading(false);
+    }
   };
 
   return (
@@ -220,6 +232,14 @@ export default function GuestListScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              void safeRun(refresh, 'Unable to refresh events.', setGuestActionError);
+            }}
+          />
+        }
         contentContainerStyle={{
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 120,
@@ -276,7 +296,20 @@ export default function GuestListScreen() {
           </View>
 
           <View className="gap-4">
-            {!hasEvents ? (
+            {loading && (
+              <View className={`items-center rounded-[28px] border p-8 shadow-sm ${theme.surface}`}>
+                <ActivityIndicator color="#9333ea" />
+                <Text className={`mt-3 text-sm font-semibold ${theme.subText}`}>Loading guests...</Text>
+              </View>
+            )}
+
+            {!!(error || guestActionError) && (
+              <View className={`rounded-[28px] border p-5 shadow-sm ${theme.surface}`}>
+                <Text className="text-sm font-semibold text-red-500">{guestActionError || error}</Text>
+              </View>
+            )}
+
+            {!loading && !refreshing && !hasEvents ? (
               <View className={`items-center rounded-[28px] border p-8 shadow-sm ${theme.surface}`}>
                 <View className={`mb-4 h-20 w-20 items-center justify-center rounded-full ${theme.surfaceMuted}`}>
                   <UserPlus color="#9333ea" size={38} />
@@ -308,9 +341,9 @@ export default function GuestListScreen() {
               sortedEvents.map((event, eventIndex) => {
               const isExpanded = expandedEvents.includes(event.id);
               const eventStats = {
-                going: event.guests.filter((guest) => guest.status === 'going').length,
-                maybe: event.guests.filter((guest) => guest.status === 'maybe').length,
-                pending: event.guests.filter((guest) => guest.status === 'pending').length,
+                going: (event.guests ?? []).filter((guest) => guest.status === 'going').length,
+                maybe: (event.guests ?? []).filter((guest) => guest.status === 'maybe').length,
+                pending: (event.guests ?? []).filter((guest) => guest.status === 'pending').length,
               };
 
               return (
@@ -332,7 +365,7 @@ export default function GuestListScreen() {
                           {event.name}
                         </Text>
                         <Text className={`text-xs font-medium ${theme.subText}`}>
-                          {event.guests.length} guests total
+                          {event.guests?.length ?? 0} guests total
                         </Text>
                       </View>
                     </View>
@@ -352,31 +385,61 @@ export default function GuestListScreen() {
 
                   {isExpanded && (
                     <View className={`border-t p-4 ${theme.divider}`}>
-                      {event.guests.length === 0 ? (
+                      {(event.guests?.length ?? 0) === 0 ? (
                         <View className="items-center py-6">
                           <View className={`mb-3 h-14 w-14 items-center justify-center rounded-full ${theme.surfaceMuted}`}>
                             <UserPlus color="#9333ea" size={26} />
                           </View>
-                          <Text className={`mb-1 text-base font-black ${theme.headerText}`}>
-                            No guests yet
-                          </Text>
-                          <Text className={`mb-4 text-center text-sm ${theme.subText}`}>
-                            Add guests to this event and track their RSVP.
-                          </Text>
-                          <Pressable
-                            onPress={() => {
-                              setSelectedEventId(event.id);
-                              setShowAddModal(true);
-                            }}
-                            className="rounded-xl bg-purple-600 px-5 py-2.5"
-                          >
-                            <Text className="font-bold text-white">Add Guest</Text>
-                          </Pressable>
+                          {guestState.loadingByEventId[event.id] ? (
+                            <>
+                              <ActivityIndicator color="#9333ea" />
+                              <Text className={`mt-3 text-sm font-semibold ${theme.subText}`}>
+                                Loading guests...
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <Text className={`mb-1 text-base font-black ${theme.headerText}`}>
+                                No guests yet
+                              </Text>
+                              <Text className={`mb-4 text-center text-sm ${theme.subText}`}>
+                                Add guests to this event and track their RSVP.
+                              </Text>
+                              <Pressable
+                                onPress={() => {
+                                  setSelectedEventId(event.id);
+                                  setShowAddModal(true);
+                                }}
+                                className="rounded-xl bg-purple-600 px-5 py-2.5"
+                              >
+                                <Text className="font-bold text-white">Add Guest</Text>
+                              </Pressable>
+                            </>
+                          )}
                         </View>
                       ) : (
                         <View className="gap-3">
-                          {event.guests.map((guest, guestIndex) => (
-                            <GuestRow key={guest.id} guest={guest} index={guestIndex} theme={theme} />
+                          {(event.guests ?? []).map((guest, guestIndex) => (
+                            <GuestRow
+                              key={guest.id}
+                              guest={guest}
+                              index={guestIndex}
+                              theme={theme}
+                              onDelete={() =>
+                                void safeRun(
+                                  () => handleDeleteGuest(event.id, guest.id),
+                                  'Failed to delete guest.',
+                                  setGuestActionError,
+                                )
+                              }
+                              onPress={() => {
+                                void safeRun(
+                                  () => handleOpenGuestDetails(event, guest),
+                                  'Failed to load guest details.',
+                                  setGuestActionError,
+                                );
+                              }}
+                            />
                           ))}
                         </View>
                       )}
@@ -435,13 +498,35 @@ export default function GuestListScreen() {
         setContactMethod={setContactMethod}
         contactValue={contactValue}
         setContactValue={setContactValue}
-        onAddGuest={handleAddGuest}
+        onAddGuest={() => {
+          void safeRun(handleAddGuest, 'Failed to add guest.', setGuestActionError);
+        }}
+      />
+
+      <GuestDetailsModal
+        visible={!!selectedGuestDetails}
+        guest={selectedGuestDetails?.guest}
+        event={selectedGuestDetails?.event}
+        loading={guestDetailsLoading}
+        onClose={() => setSelectedGuestDetails(null)}
       />
     </LinearGradient>
   );
 }
 
-function GuestRow({ guest, index, theme }: { guest: Guest; index: number; theme: ReturnType<typeof useScreenTheme> }) {
+function GuestRow({
+  guest,
+  index,
+  theme,
+  onDelete,
+  onPress,
+}: {
+  guest: Guest;
+  index: number;
+  theme: ReturnType<typeof useScreenTheme>;
+  onDelete: () => void;
+  onPress: () => void;
+}) {
   const status = statusConfig[guest.status];
   const StatusIcon = status.icon;
   const ContactIcon =
@@ -458,7 +543,7 @@ function GuestRow({ guest, index, theme }: { guest: Guest; index: number; theme:
       transition={{ type: 'timing', delay: index * 30, duration: 200 }}
       className={`rounded-xl p-3 ${theme.surfaceMuted}`}
     >
-      <View className="flex-row items-center gap-3">
+      <Pressable onPress={onPress} className="flex-row items-center gap-3">
         {guest.profileImage ? (
           <Image source={{ uri: guest.profileImage }} className="h-10 w-10 rounded-lg" />
         ) : (
@@ -493,7 +578,14 @@ function GuestRow({ guest, index, theme }: { guest: Guest; index: number; theme:
             )}
           </View>
         </View>
-      </View>
+
+        <Pressable
+          onPress={onDelete}
+          className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
+        >
+          <Trash2 color="#dc2626" size={16} />
+        </Pressable>
+      </Pressable>
     </MotiView>
   );
 }
@@ -532,4 +624,52 @@ function SortOption({
       </Text>
     </Pressable>
   );
+}
+
+function mapEventItem(event: Event, guests: Guest[] = []): EventItem {
+  const slug = event.category_slug || (typeof event.category === 'string' ? event.category : event.category?.slug) || 'party';
+
+  return {
+    id: event.uuid || event.id,
+    name: event.title,
+    category: (['birthday', 'meeting', 'party'].includes(slug) ? slug : 'party') as EventItem['category'],
+    categoryColor: categoryColors(slug),
+    guests: Array.isArray(guests) ? guests : [],
+    source: event,
+  };
+}
+
+function mapGuest(guest: EventGuest): Guest {
+  const name = guest.name || 'Guest';
+  const normalizedStatus = normalizeGuestStatus(guest.response_status || guest.status);
+  const status = normalizedStatus === 'not_going' ? 'not-going' : normalizedStatus;
+
+  return {
+    id: guest.uuid || guest.id,
+    name,
+    status,
+    avatar: generateInitials(name),
+    color: [['#34d399', '#059669'], ['#60a5fa', '#2563eb'], ['#c084fc', '#9333ea']][Math.floor(Math.random() * 3)] as [string, string],
+    contactMethod: guest.email ? 'email' : 'whatsapp',
+    contactValue: guest.email || guest.phone_number || '',
+    source: guest,
+  };
+}
+
+function generateInitials(name: string) {
+  const parts = name.trim().split(' ');
+  return parts.length >= 2
+    ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    : name.substring(0, 2).toUpperCase();
+}
+
+function categoryColors(category: string): [string, string] {
+  const colors: Record<string, [string, string]> = {
+    birthday: ['#f472b6', '#db2777'],
+    meeting: ['#22d3ee', '#0891b2'],
+    party: ['#fb923c', '#ea580c'],
+    wedding: ['#c084fc', '#9333ea'],
+  };
+
+  return colors[category] || colors.party;
 }

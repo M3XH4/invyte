@@ -64,12 +64,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 export function useAppTheme() {
   const context = useContext(ThemeContext);
+  const deviceScheme = useRNColorScheme();
 
   if (context) {
     return context;
   }
 
-  const deviceScheme = useRNColorScheme();
   const scheme: ThemeScheme = deviceScheme === 'dark' ? 'dark' : 'light';
 
   return {

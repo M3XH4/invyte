@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -14,17 +15,22 @@ import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/hooks/useAuth';
+
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 
 export default function VerifyCodeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { email = '' } = useLocalSearchParams<{ email?: string }>();
+  const { verifyCode, forgotPassword } = useAuth();
 
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [timeLeft, setTimeLeft] = useState(60);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const inputRefs = useRef<Array<TextInput | null>>([]);
+  const inputRefs = useRef<(TextInput | null)[]>([]);
 
   useEffect(() => {
     if (timeLeft <= 0) return;
@@ -77,24 +83,39 @@ export default function VerifyCodeScreen() {
     }
   };
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     const verificationCode = code.join('');
 
     if (verificationCode.length !== 6) return;
 
-    router.push({
-      pathname: '/reset-password',
-      params: {
-        email,
-        code: verificationCode,
-      },
-    });
+    try {
+      setLoading(true);
+      setError('');
+      await verifyCode(String(email), verificationCode);
+      router.push({
+        pathname: '/reset-password',
+        params: {
+          email,
+          code: verificationCode,
+        },
+      });
+    } catch (error: any) {
+      setError(error.message || 'Invalid verification code.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleResend = () => {
-    setTimeLeft(60);
-    setCode(['', '', '', '', '', '']);
-    inputRefs.current[0]?.focus();
+  const handleResend = async () => {
+    try {
+      await forgotPassword(String(email));
+      setError('');
+      setTimeLeft(60);
+      setCode(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+    } catch (error: any) {
+      setError(error.message || 'Unable to resend code.');
+    }
   };
 
   return (
@@ -290,14 +311,20 @@ export default function VerifyCodeScreen() {
               )}
             </View>
 
+            {!!error && (
+              <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+                <Text className="text-sm font-semibold text-red-200">{error}</Text>
+              </View>
+            )}
+
             <View className="flex-1" />
 
             <MotiPressable
-              disabled={code.join('').length !== 6}
+              disabled={loading || code.join('').length !== 6}
               onPress={handleVerify}
               animate={({ pressed }) => {
                 'worklet';
-                const enabled = code.join('').length === 6;
+                const enabled = !loading && code.join('').length === 6;
 
                 return {
                   scale: pressed && enabled ? 0.97 : 1,
@@ -310,10 +337,16 @@ export default function VerifyCodeScreen() {
                 colors={['#FFD700', '#FFA500']}
                 className="h-14 flex-row items-center justify-center gap-2"
               >
-                <CheckCircle color="#000045" size={20} />
-                <Text className="text-lg font-black text-[#000045]">
-                  Verify Code
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#000045" />
+                ) : (
+                  <>
+                    <CheckCircle color="#000045" size={20} />
+                    <Text className="text-lg font-black text-[#000045]">
+                      Verify Code
+                    </Text>
+                  </>
+                )}
               </LinearGradient>
             </MotiPressable>
           </MotiView>

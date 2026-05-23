@@ -1,7 +1,10 @@
 import { Pressable, View, Image } from 'react-native'
 import React from 'react'
+import { useRouter } from 'expo-router';
 import { MotiView, MotiImage, MotiText } from 'moti';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { profileApi } from '@/api/profileApi';
+import { authStore } from '@/store/authStore';
 type DecorativeElement = {
   type: 'star' | 'diamond' | 'planet'
   size: number
@@ -13,8 +16,19 @@ type DecorativeElement = {
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 const kidInARocket = require('@/assets/images/kid-in-a-rocket.png');
 
-export default function GettingStartedScreen({ onContinue }: { onContinue: () => void }) {
+export default function GettingStartedScreen({ onContinue }: { onContinue?: () => void }) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const handleContinue =
+    onContinue ??
+    (async () => {
+      try {
+        const user = await profileApi.update({ has_seen_getting_started: true });
+        await authStore.setUser(user);
+      } finally {
+        router.replace('/onboarding');
+      }
+    });
 
   const decorativeElements: DecorativeElement[] = [
     { type: 'star', size: 24, color: '#facc15', top: '8%', left: '10%' },
@@ -31,7 +45,7 @@ export default function GettingStartedScreen({ onContinue }: { onContinue: () =>
 
   return (
       <Pressable
-        onPress={onContinue}
+        onPress={handleContinue}
         className="relative flex-1 overflow-hidden bg-[#0f0c29]"
       >
         <View className="absolute inset-0">

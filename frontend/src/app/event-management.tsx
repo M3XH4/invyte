@@ -1,15 +1,20 @@
 // app/event-management.tsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ArrowLeft,
+  Camera,
   Calendar,
   Check,
   Clock,
@@ -25,75 +30,132 @@ import {
   UpdatesTab,
   DeleteModal,
 } from '@/components/event-management-tabs';
+import AddGuestModal from '@/components/add-guest-modal';
+import GuestDetailsModal from '@/components/guest-details-modal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { eventsApi } from '@/api/eventsApi';
+import { rsvpApi } from '@/api/rsvpApi';
+import { useEvent } from '@/hooks/useEvents';
+import { useGuests } from '@/hooks/useGuests';
+import { eventStore } from '@/store/eventStore';
+import { guestStore } from '@/store/guestStore';
+import { activityLogStore, useActivityLogStore } from '@/store/activityLogStore';
+import { safeRun } from '@/utils/safeRun';
+import {
+  combineDateTimeForApi,
+  formatDateForDisplay,
+  formatTimeForDisplay,
+  isBeforeDateTime,
+  isFutureDateTime,
+  normalizeTime,
+  splitApiDateTime,
+} from '@/utils/dateTime';
+import { imageUriToFormData } from '@/utils/upload';
+import { normalizeGuestStatus } from '@/utils/rsvpStats';
+import type { RSVPQuestion } from '@/types/rsvp';
+import type { EventGuest } from '@/types/guest';
 
 type TabType = 'details' | 'rsvp' | 'guests' | 'attendance' | 'updates';
-
-type Guest = {
-  id: number;
-  name: string;
-  email: string;
-  status: 'going' | 'maybe' | 'pending' | 'not-going';
-  attended?: boolean;
-  checkedInAt?: string;
-};
 
 export default function EventManagementScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
-  const { event } = useLocalSearchParams<{ event?: string }>();
+  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const { event, setEvent, loading: eventLoading, error: eventError, reload: reloadEvent } = useEvent(eventId);
+  const { guests, loading: guestsLoading, refresh: refreshGuests } = useGuests(eventId);
+  const activityState = useActivityLogStore();
 
-  const selectedEvent = event ? JSON.parse(event) : null;
   const [activeTab, setActiveTab] = useState<TabType>('details');
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id?: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: string; id?: string } | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [screenError, setScreenError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [eventDetails, setEventDetails] = useState({
-    title: selectedEvent?.title ?? "Untitled Event",
-    category: selectedEvent?.category ?? "Event",
-    date: selectedEvent?.date ?? "",
-    time: selectedEvent?.time ?? "",
-    venue: selectedEvent?.location ?? "",
-    description:
-      selectedEvent?.description ??
-      "No description added yet.",
-    theme: selectedEvent?.theme ?? "Default Theme",
+    title: "Untitled Event",
+    category: "Event",
+    date: "",
+    time: "",
+    venue: "",
+    description: "No description added yet.",
+    theme: "Default Theme",
+    coverImage: "",
   });
 
   const [rsvpSettings, setRsvpSettings] = useState({
     enabled: true,
-    deadline: '',
-    maxGuests: String(selectedEvent?.totalInvited ?? 0),
+    deadlineDate: '',
+    deadlineTime: '',
+    maxGuests: '0',
     allowPlusOnes: true,
   });
 
-  const [rsvpQuestions, setRsvpQuestions] = useState([
-    { id: 1, question: 'Food preference', placeholder: 'Vegetarian, Vegan, No preference' },
-    { id: 2, question: 'Song request', placeholder: 'What song gets you dancing?' },
-  ]);
-
-  const [guests, setGuests] = useState<Guest[]>([
-    { id: 1, name: 'Alex Morgan', email: 'alex@example.com', status: 'going', attended: false },
-    { id: 2, name: 'Jordan Lee', email: 'jordan@example.com', status: 'going', attended: true, checkedInAt: '7:15 PM' },
-    { id: 3, name: 'Taylor Swift', email: 'taylor@example.com', status: 'maybe', attended: false },
-    { id: 4, name: 'Morgan Freeman', email: 'morgan@example.com', status: 'going', attended: false },
-    { id: 5, name: 'Riley Cooper', email: 'riley@example.com', status: 'pending', attended: false },
-  ]);
+  const [rsvpQuestions, setRsvpQuestions] = useState<RSVPQuestion[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const [activityLog, setActivityLog] = useState([
-    { id: 1, action: 'Event details updated', timestamp: 'Just now', type: 'update' },
-    { id: 2, action: 'New guest added: Alex Morgan', timestamp: '2 minutes ago', type: 'create' },
-    { id: 3, action: 'RSVP deadline changed', timestamp: 'Today, 7:30 PM', type: 'update' },
-  ]);
+  const activityLog = eventId ? activityState.logsByEventId[eventId] ?? [] : [];
+  const activityLoading = eventId ? !!activityState.loadingByEventId[eventId] : false;
+  const [showAddGuestModal, setShowAddGuestModal] = useState(false);
+  const [selectedGuestDetails, setSelectedGuestDetails] = useState<EventGuest | null>(null);
+  const [guestDetailsLoading, setGuestDetailsLoading] = useState(false);
+  const [newGuestName, setNewGuestName] = useState('');
+  const [selectedGuestStatus, setSelectedGuestStatus] = useState<'going' | 'maybe' | 'pending' | 'not-going'>('pending');
+  const [contactMethod, setContactMethod] = useState<'email' | 'whatsapp' | 'messenger' | 'telegram'>('email');
+  const [contactValue, setContactValue] = useState('');
+
+  useEffect(() => {
+    if (!event) return;
+
+    setEventDetails({
+      title: event.title,
+      category: event.category_name || event.category_slug || 'Event',
+      date: event.date || event.start_date || '',
+      time: normalizeTime(event.time || event.start_time || ''),
+      venue: event.location || event.venue_address || '',
+      description: event.description || 'No description added yet.',
+      theme: typeof event.theme === 'string' ? event.theme : event.theme?.name || 'Default Theme',
+      coverImage: event.coverImage || event.cover_image || '',
+    });
+
+    const deadline = splitApiDateTime(event.rsvp_deadline);
+    setRsvpSettings({
+      enabled: !!event.rsvp_enabled,
+      deadlineDate: deadline.date,
+      deadlineTime: deadline.time,
+      maxGuests: String(event.max_guests || event.totalInvited || 0),
+      allowPlusOnes: !!event.allow_plus_ones,
+    });
+
+    setRsvpQuestions(event.questions || []);
+  }, [event]);
+
+  useEffect(() => {
+    if (!eventId) return;
+
+    const loadExtra = async () => {
+      try {
+        const [questions] = await Promise.allSettled([
+          rsvpApi.questions(eventId),
+          activityLogStore.fetchActivityLogs(eventId),
+        ]);
+
+        if (questions.status === 'fulfilled') setRsvpQuestions(questions.value);
+      } catch {
+        // Event details and guests are enough for core management; logs are optional.
+      }
+    };
+
+    loadExtra();
+  }, [eventId]);
 
   const tabs: { id: TabType; label: string }[] = [
     { id: 'details', label: 'Details' },
@@ -109,51 +171,327 @@ export default function EventManagementScreen() {
     setTimeout(() => setShowToast(false), 2500);
   };
 
-  const addActivityLog = (action: string, type: string) => {
-    setActivityLog((prev) => [
-      { id: Date.now(), action, timestamp: 'Just now', type },
-      ...prev,
-    ]);
+  const showActionError = (message: string) => {
+    setScreenError(message);
   };
 
-  const filteredGuests = guests.filter((guest) => {
+  useEffect(() => {
+    if (typeof __DEV__ === 'undefined' || __DEV__) {
+      console.log('[event-management] eventId param', eventId);
+    }
+  }, [eventId]);
+
+  useEffect(() => {
+    if (event && (typeof __DEV__ === 'undefined' || __DEV__)) {
+      console.log('[event-management] active event', {
+        eventId: event.uuid || event.id,
+        title: event.title,
+      });
+    }
+  }, [event]);
+
+  const safeGuests = Array.isArray(guests) ? guests : [];
+
+  const filteredGuests = safeGuests.filter((guest) => {
     const matchesSearch =
       guest.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      guest.email.toLowerCase().includes(searchQuery.toLowerCase());
+      (guest.email || '').toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesFilter = statusFilter === 'all' || guest.status === statusFilter;
+    const status = normalizeStatus(guest.status || guest.response_status);
+    const matchesFilter = statusFilter === 'all' || status === statusFilter;
 
     return matchesSearch && matchesFilter;
   });
 
   const guestStats = {
-    going: guests.filter((g) => g.status === 'going').length,
-    maybe: guests.filter((g) => g.status === 'maybe').length,
-    pending: guests.filter((g) => g.status === 'pending').length,
-    attended: guests.filter((g) => g.attended).length,
+    going: safeGuests.filter((g) => normalizeStatus(g.status || g.response_status) === 'going').length,
+    maybe: safeGuests.filter((g) => normalizeStatus(g.status || g.response_status) === 'maybe').length,
+    pending: safeGuests.filter((g) => normalizeStatus(g.status || g.response_status) === 'pending').length,
+    attended: safeGuests.filter((g) => g.attended).length,
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
+    if (!eventId) return;
+
     if (deleteTarget?.type === 'event') {
+      const response = await eventStore.archiveEvent(eventId);
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[event-management] archive event response', response);
+      }
       setShowDeleteModal(false);
-      showSuccessToast('Event deleted successfully');
-      setTimeout(() => router.replace('/tabs/events'), 1000);
+      showSuccessToast('Event moved to archive');
+      router.replace('/tabs/events');
+      return;
     }
 
     if (deleteTarget?.type === 'guest' && deleteTarget.id) {
-      setGuests((prev) => prev.filter((g) => g.id !== deleteTarget.id));
+      await guestStore.deleteGuest(eventId, deleteTarget.id);
       setShowDeleteModal(false);
       showSuccessToast('Guest removed successfully');
-      addActivityLog('Guest removed', 'delete');
+      return;
     }
 
     if (deleteTarget?.type === 'rsvp-question' && deleteTarget.id) {
+      await rsvpApi.deleteQuestion(eventId, deleteTarget.id);
       setRsvpQuestions((prev) => prev.filter((q) => q.id !== deleteTarget.id));
+      await activityLogStore.fetchActivityLogs(eventId, { force: true });
       setShowDeleteModal(false);
       showSuccessToast('RSVP question deleted');
-      addActivityLog('RSVP question deleted', 'delete');
     }
   };
+
+  const handleSaveEvent = async () => {
+    if (!eventId) return;
+    const errors: Record<string, string> = {};
+    if (!eventDetails.title.trim()) {
+      errors.title = 'Event title is required.';
+    }
+    if (!eventDetails.date.trim()) {
+      errors.start_date = 'Event date is required.';
+    }
+    if (!eventDetails.time.trim()) {
+      errors.start_time = 'Event time is required.';
+    }
+    if (
+      eventDetails.date &&
+      eventDetails.time &&
+      !isFutureDateTime(eventDetails.date, eventDetails.time)
+    ) {
+      errors.start_time = 'Event start must be after the current time.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setScreenError('Please fix the highlighted fields.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setScreenError('');
+      setFieldErrors({});
+      const payload = {
+        title: eventDetails.title,
+        description: eventDetails.description,
+        start_date: eventDetails.date,
+        start_time: normalizeTime(eventDetails.time),
+        venue_address: eventDetails.venue,
+      };
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[event-management] update payload', { eventId, payload });
+      }
+      const updated = await eventsApi.update(eventId, payload);
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[event-management] update response', updated);
+      }
+      setEvent(updated);
+      eventStore.updateEvent(updated);
+      await activityLogStore.fetchActivityLogs(eventId, { force: true });
+      setIsEditing(false);
+      showSuccessToast('Event details saved successfully');
+    } catch (error: any) {
+      setScreenError(error.message || 'Unable to save event.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveRsvp = async () => {
+    if (!eventId) return;
+    const errors: Record<string, string> = {};
+
+    if (rsvpSettings.enabled) {
+      if (!rsvpSettings.deadlineDate) errors.rsvp_deadline = 'RSVP deadline date is required.';
+      if (!rsvpSettings.deadlineTime) errors.rsvp_deadline_time = 'RSVP deadline time is required.';
+      if (
+        rsvpSettings.deadlineDate &&
+        rsvpSettings.deadlineTime &&
+        !isFutureDateTime(rsvpSettings.deadlineDate, rsvpSettings.deadlineTime)
+      ) {
+        errors.rsvp_deadline_time = 'RSVP deadline must be in the future.';
+      }
+      if (
+        rsvpSettings.deadlineDate &&
+        rsvpSettings.deadlineTime &&
+        !isBeforeDateTime(
+          rsvpSettings.deadlineDate,
+          rsvpSettings.deadlineTime,
+          eventDetails.date,
+          eventDetails.time,
+        )
+      ) {
+        errors.rsvp_deadline = 'RSVP deadline must be before the event starts.';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setScreenError('Please fix the highlighted fields.');
+      return;
+    }
+
+    try {
+      setFieldErrors({});
+      const updated = await eventsApi.update(eventId, {
+        rsvp_enabled: rsvpSettings.enabled,
+        rsvp_deadline: rsvpSettings.enabled
+          ? combineDateTimeForApi(rsvpSettings.deadlineDate, rsvpSettings.deadlineTime)
+          : undefined,
+        max_guests: Number(rsvpSettings.maxGuests) || undefined,
+        allow_plus_ones: rsvpSettings.allowPlusOnes,
+      });
+      setEvent(updated);
+      eventStore.updateEvent(updated);
+      await activityLogStore.fetchActivityLogs(eventId, { force: true });
+      showSuccessToast('RSVP settings saved successfully');
+    } catch (error: any) {
+      setScreenError(error.message || 'Unable to save RSVP settings.');
+    }
+  };
+
+  const handleChangeCover = async () => {
+    if (!eventId) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setScreenError('Photo library permission is required to change the cover.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    try {
+      setSaving(true);
+      setScreenError('');
+      const asset = result.assets[0];
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[event-management] upload cover asset', {
+          eventId,
+          uri: asset.uri,
+          fileName: asset.fileName,
+          mimeType: asset.mimeType,
+          fileSize: asset.fileSize,
+        });
+      }
+      const updated = await eventsApi.uploadCover(
+        eventId,
+        imageUriToFormData('cover', asset.uri, asset.fileName || undefined, asset.mimeType || undefined),
+      );
+      setEvent(updated);
+      eventStore.updateEvent(updated);
+      setEventDetails((prev) => ({ ...prev, coverImage: updated.coverImage || updated.cover_image || asset.uri }));
+      showSuccessToast('Cover updated successfully');
+    } catch (error: any) {
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.warn('[event-management] cover upload failed', {
+          message: error?.message,
+          status: error?.status,
+          errors: error?.errors,
+        });
+      }
+      setScreenError(error.message || 'Unable to update cover.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddQuestion = async () => {
+    if (!eventId) return;
+
+    const question = await rsvpApi.createQuestion(eventId, {
+      question: 'New Question',
+      question_type: 'text',
+      required: false,
+    });
+    setRsvpQuestions((prev) => [...prev, question]);
+    await activityLogStore.fetchActivityLogs(eventId, { force: true });
+    showSuccessToast('RSVP question added');
+  };
+
+  const handleAddGuest = async () => {
+    if (!eventId) {
+      setScreenError('Event not found.');
+      return;
+    }
+    if (!newGuestName.trim()) {
+      setScreenError('Guest name is required.');
+      return;
+    }
+    if (!contactValue.trim()) {
+      setScreenError(contactMethod === 'email' ? 'Email is required.' : 'Contact information is required.');
+      return;
+    }
+
+    try {
+      setScreenError('');
+      const payload = {
+        name: newGuestName.trim(),
+        email: contactMethod === 'email' ? contactValue.trim() : undefined,
+        phone_number: contactMethod !== 'email' ? contactValue.trim() : undefined,
+        contact_method: contactMethod,
+        contact_value: contactValue.trim(),
+        response_status: selectedGuestStatus === 'not-going' ? 'not_going' : selectedGuestStatus,
+        invite_status: 'pending',
+      };
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[event-management] create guest payload', { eventId, payload });
+      }
+      await guestStore.addGuest(eventId, payload);
+
+      setNewGuestName('');
+      setSelectedGuestStatus('pending');
+      setContactMethod('email');
+      setContactValue('');
+      setShowAddGuestModal(false);
+      showSuccessToast('Guest added successfully');
+    } catch (error: any) {
+      setScreenError(error.message || 'Unable to add guest.');
+    }
+  };
+
+  const handleOpenGuestDetails = async (guest: EventGuest) => {
+    setSelectedGuestDetails(guest);
+    if (!eventId) return;
+
+    try {
+      setGuestDetailsLoading(true);
+      const detailed = await guestStore.fetchGuestDetails(eventId, guest.uuid || guest.id);
+      setSelectedGuestDetails(detailed);
+    } catch (error: any) {
+      setScreenError(error.message || 'Unable to load guest details.');
+    } finally {
+      setGuestDetailsLoading(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    void safeRun(async () => {
+      await Promise.all([
+        reloadEvent(),
+        refreshGuests(),
+        eventId ? activityLogStore.fetchActivityLogs(eventId, { force: true }) : Promise.resolve([]),
+      ]);
+    }, 'Unable to refresh event.', showActionError);
+  };
+
+  if (!eventId) {
+    return (
+      <View className={`flex-1 items-center justify-center px-6 ${theme.page}`}>
+        <Text className={`mb-3 text-xl font-black ${theme.headerText}`}>Missing Event</Text>
+        <Text className={`mb-6 text-center text-sm ${theme.subText}`}>Open an event from My Events to manage it.</Text>
+        <Pressable onPress={() => router.replace('/tabs/events')} className="rounded-xl bg-purple-600 px-5 py-3">
+          <Text className="font-bold text-white">Back to Events</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View className={`flex-1 ${theme.page}`}>
@@ -163,6 +501,9 @@ export default function EventManagementScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={eventLoading || guestsLoading} onRefresh={handleRefresh} />
+        }
         contentContainerStyle={{
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 40,
@@ -182,49 +523,77 @@ export default function EventManagementScreen() {
             </Text>
 
             <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: '/event-management-settings',
-                  params: {
-                    event: JSON.stringify(selectedEvent),
-                  },
-                })
-              }
+              onPress={() => router.push({ pathname: '/event-management-settings', params: { eventId } })}
               className={`h-11 w-11 items-center justify-center rounded-2xl border shadow-sm ${theme.iconButton}`}
             >
               <MoreVertical color={theme.iconColor} size={20} />
             </Pressable>
           </View>
 
-          <LinearGradient
-            colors={['#a855f7', '#9333ea', '#ec4899']}
-            className="mb-6 p-5"
+          {(eventLoading || guestsLoading) && (
+            <View className={`mb-4 rounded-[20px] border p-4 ${theme.surface}`}>
+              <ActivityIndicator color="#9333ea" />
+              <Text className={`mt-2 text-center text-sm font-semibold ${theme.subText}`}>
+                Loading event...
+              </Text>
+            </View>
+          )}
+
+          {!!(eventError || screenError) && (
+            <View className={`mb-4 rounded-[20px] border p-4 ${theme.surface}`}>
+              <Text className="text-sm font-semibold text-red-500">
+                {screenError || eventError}
+              </Text>
+            </View>
+          )}
+
+          <View
+            className="mb-6 overflow-hidden"
             style={{
               borderRadius: 28,
             }}
           >
-            <Text className="mb-1 text-2xl font-black text-white">
-              {eventDetails.title}
-            </Text>
+            {eventDetails.coverImage ? (
+              <Image source={{ uri: eventDetails.coverImage }} className="absolute inset-0 h-full w-full" resizeMode="cover" />
+            ) : null}
+            <LinearGradient
+              colors={eventDetails.coverImage ? ['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.78)'] : ['#a855f7', '#9333ea', '#ec4899']}
+              className="min-h-[190px] justify-end p-5"
+            >
+              <Pressable
+                onPress={() => {
+                  void safeRun(handleChangeCover, 'Unable to update cover.', showActionError);
+                }}
+                disabled={saving}
+                className="absolute right-4 top-4 flex-row items-center gap-2 rounded-full bg-black/35 px-3 py-2"
+              >
+                <Camera color="white" size={16} />
+                <Text className="text-xs font-black text-white">Change Cover</Text>
+              </Pressable>
 
-            <View className="mb-3 flex-row items-center gap-2">
-              <Calendar color="white" size={16} />
-              <Text className="text-sm font-medium text-white/80">
-                {eventDetails.date}
+              <Text className="mb-1 text-2xl font-black text-white">
+                {eventDetails.title}
               </Text>
-              <Clock color="white" size={16} />
-              <Text className="text-sm font-medium text-white/80">
-                {eventDetails.time}
-              </Text>
-            </View>
 
-            <View className="flex-row items-center gap-2">
-              <MapPin color="white" size={16} />
-              <Text numberOfLines={1} className="flex-1 text-sm font-medium text-white/80">
-                {eventDetails.venue}
-              </Text>
-            </View>
-          </LinearGradient>
+              <View className="mb-3 flex-row items-center gap-2">
+                <Calendar color="white" size={16} />
+                <Text className="text-sm font-medium text-white/80">
+                  {formatDateForDisplay(eventDetails.date) || eventDetails.date}
+                </Text>
+                <Clock color="white" size={16} />
+                <Text className="text-sm font-medium text-white/80">
+                  {formatTimeForDisplay(eventDetails.time) || eventDetails.time}
+                </Text>
+              </View>
+
+              <View className="flex-row items-center gap-2">
+                <MapPin color="white" size={16} />
+                <Text numberOfLines={1} className="flex-1 text-sm font-medium text-white/80">
+                  {eventDetails.venue}
+                </Text>
+              </View>
+            </LinearGradient>
+          </View>
 
           <View className={`mb-6 rounded-[24px] border p-1.5 ${theme.surface}`}>
             <View className="flex-row gap-1">
@@ -266,9 +635,9 @@ export default function EventManagementScreen() {
               isEditing={isEditing}
               setIsEditing={setIsEditing}
               onSave={() => {
-                setIsEditing(false);
-                showSuccessToast('Event details saved successfully');
+                if (!saving) void safeRun(handleSaveEvent, 'Failed to update event.', showActionError);
               }}
+              fieldErrors={fieldErrors}
               onDelete={() => {
                 setDeleteTarget({ type: 'event' });
                 setShowDeleteModal(true);
@@ -279,73 +648,64 @@ export default function EventManagementScreen() {
           {activeTab === 'rsvp' && (
             <RSVPTab
               event={event}
+              eventId={eventId}
               rsvpSettings={rsvpSettings}
               setRsvpSettings={setRsvpSettings}
               rsvpQuestions={rsvpQuestions}
               setRsvpQuestions={setRsvpQuestions}
+              eventStartDate={eventDetails.date}
+              fieldErrors={fieldErrors}
               onDeleteQuestion={(id: number) => {
-                setDeleteTarget({ type: 'rsvp-question', id });
+                setDeleteTarget({ type: 'rsvp-question', id: String(id) });
                 setShowDeleteModal(true);
               }}
-              onSave={() => showSuccessToast('RSVP settings saved successfully')}
+              onAddQuestion={() => {
+                void safeRun(handleAddQuestion, 'Failed to add RSVP question.', showActionError);
+              }}
+              onSave={() => {
+                void safeRun(handleSaveRsvp, 'Failed to save RSVP settings.', showActionError);
+              }}
             />
           )}
 
           {activeTab === 'guests' && (
             <GuestsTab
               guests={filteredGuests}
+              loading={guestsLoading}
+              loaded={eventId ? !!guestStore.getSnapshot().loadedByEventId[eventId] : false}
               guestStats={guestStats}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               statusFilter={statusFilter}
               setStatusFilter={setStatusFilter}
               onAddGuest={() => {
-                const guest: Guest = {
-                  id: Date.now(),
-                  name: 'New Guest',
-                  email: 'guest@example.com',
-                  status: 'pending',
-                  attended: false,
-                };
-
-                setGuests((prev) => [...prev, guest]);
-                showSuccessToast('Guest added successfully');
+                setShowAddGuestModal(true);
               }}
-              onDeleteGuest={(id: number) => {
+              onDeleteGuest={(id: string) => {
                 setDeleteTarget({ type: 'guest', id });
                 setShowDeleteModal(true);
               }}
+              onOpenGuest={handleOpenGuestDetails}
             />
           )}
 
           {activeTab === 'attendance' && (
             <AttendanceTab
-              guests={guests}
+              guests={safeGuests}
+              loading={guestsLoading}
+              loaded={eventId ? !!guestStore.getSnapshot().loadedByEventId[eventId] : false}
               attendedCount={guestStats.attended}
-              onUpdateAttendance={(id: number, attended: boolean) => {
-                setGuests((prev) =>
-                  prev.map((g) =>
-                    g.id === id
-                      ? {
-                        ...g,
-                        attended,
-                        checkedInAt: attended
-                          ? new Date().toLocaleTimeString([], {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })
-                          : undefined,
-                      }
-                      : g
-                  )
-                );
-
-                showSuccessToast(attended ? 'Guest checked in' : 'Attendance reset');
+              onUpdateAttendance={(id: string, attended: boolean) => {
+                void safeRun(async () => {
+                  if (!eventId) throw new Error('Event not found.');
+                  await guestStore.updateAttendance(eventId, id, attended);
+                  showSuccessToast(attended ? 'Guest checked in' : 'Attendance reset');
+                }, 'Failed to update attendance.', showActionError);
               }}
             />
           )}
 
-          {activeTab === 'updates' && <UpdatesTab logs={activityLog} />}
+          {activeTab === 'updates' && <UpdatesTab logs={activityLog} loading={activityLoading} />}
         </View>
       </ScrollView>
 
@@ -353,7 +713,42 @@ export default function EventManagementScreen() {
         visible={showDeleteModal}
         target={deleteTarget}
         onCancel={() => setShowDeleteModal(false)}
-        onDelete={handleDelete}
+        onDelete={() => {
+          void safeRun(handleDelete, 'Failed to delete item.', showActionError);
+        }}
+      />
+
+      <AddGuestModal
+        visible={showAddGuestModal}
+        onClose={() => setShowAddGuestModal(false)}
+        events={[{
+          id: eventId,
+          name: eventDetails.title,
+          category: eventDetails.category,
+          categoryColor: ['#9333ea', '#ec4899'],
+          guests: safeGuests,
+        }]}
+        selectedEventId={eventId}
+        setSelectedEventId={() => {}}
+        newGuestName={newGuestName}
+        setNewGuestName={setNewGuestName}
+        selectedStatus={selectedGuestStatus}
+        setSelectedStatus={setSelectedGuestStatus}
+        contactMethod={contactMethod}
+        setContactMethod={setContactMethod}
+        contactValue={contactValue}
+        setContactValue={setContactValue}
+        onAddGuest={() => {
+          void safeRun(handleAddGuest, 'Failed to add guest.', showActionError);
+        }}
+      />
+
+      <GuestDetailsModal
+        visible={!!selectedGuestDetails}
+        guest={selectedGuestDetails}
+        event={event}
+        loading={guestDetailsLoading}
+        onClose={() => setSelectedGuestDetails(null)}
       />
 
       {showToast && (
@@ -373,4 +768,9 @@ export default function EventManagementScreen() {
       )}
     </View>
   );
+}
+
+function normalizeStatus(status?: string) {
+  const normalized = normalizeGuestStatus(status);
+  return normalized === 'not_going' ? 'not-going' : normalized;
 }

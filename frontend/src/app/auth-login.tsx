@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -8,11 +9,13 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Eye, EyeOff, Lock, User } from 'lucide-react-native';
+import { Check, Eye, EyeOff, Lock, User } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useAuth } from '@/hooks/useAuth';
 
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 
@@ -31,8 +34,13 @@ const facebookLogo = {
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { login, loading } = useAuth();
 
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [error, setError] = useState('');
 
   const particles = useMemo(
     () =>
@@ -58,6 +66,17 @@ export default function LoginScreen() {
     { type: 'diamond', color: '#FFD700', size: 12, top: '11%', left: '30%' },
     { type: 'diamond', color: '#00BFFF', size: 12, top: '11%', right: '30%' },
   ];
+
+  const handleLogin = async () => {
+    if (!email.trim() || !password) return;
+
+    try {
+      setError('');
+      await login(email.trim(), password, rememberMe);
+    } catch (error: any) {
+      setError(error.message || 'Unable to login. Please try again.');
+    }
+  };
 
   return (
     <View className="flex-1 bg-[#000045]">
@@ -178,6 +197,8 @@ export default function LoginScreen() {
           >
             <InputWithIcon
               icon={User}
+              value={email}
+              onChangeText={setEmail}
               placeholder="Email or Username"
               autoCapitalize="none"
             />
@@ -185,6 +206,8 @@ export default function LoginScreen() {
             <View className="relative">
               <InputWithIcon
                 icon={Lock}
+                value={password}
+                onChangeText={setPassword}
                 placeholder="Password"
                 secureTextEntry={!showPassword}
               />
@@ -201,20 +224,47 @@ export default function LoginScreen() {
               </Pressable>
             </View>
 
-            <Pressable
-              onPress={() => router.push('/forgot-password')}
-              className="items-end"
-            >
-              <Text className="text-sm text-white/60">
-                Forgot password?
-              </Text>
-            </Pressable>
+            <View className="flex-row items-center justify-between py-1">
+              <Pressable
+                onPress={() => setRememberMe((value) => !value)}
+                className="flex-row items-center gap-2"
+              >
+                <View
+                  className={`h-5 w-5 items-center justify-center rounded-md border ${
+                    rememberMe
+                      ? 'border-yellow-300 bg-yellow-400'
+                      : 'border-white/30 bg-white/5'
+                  }`}
+                >
+                  {rememberMe && <Check color="#000045" size={14} strokeWidth={4} />}
+                </View>
+                <Text className="text-sm font-semibold text-white/70">
+                  Remember me
+                </Text>
+              </Pressable>
+
+              <Pressable onPress={() => router.push('/forgot-password')}>
+                <Text className="text-sm text-white/60">
+                  Forgot password?
+                </Text>
+              </Pressable>
+            </View>
+
+            {!!error && (
+              <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+                <Text className="text-sm font-semibold text-red-200">{error}</Text>
+              </View>
+            )}
 
             <MotiPressable
-              onPress={() => router.replace('/tabs')}
+              disabled={loading || !email.trim() || !password}
+              onPress={handleLogin}
               animate={({ pressed }) => {
                 'worklet';
-                return { scale: pressed ? 0.97 : 1 };
+                return {
+                  scale: pressed && !loading ? 0.97 : 1,
+                  opacity: loading || !email.trim() || !password ? 0.6 : 1,
+                };
               }}
               style={{ marginTop: 8, overflow: 'hidden', borderRadius: 9999 }}
             >
@@ -222,9 +272,13 @@ export default function LoginScreen() {
                 colors={['#FFD700', '#FFA500']}
                 className="h-14 items-center justify-center"
               >
-                <Text className="text-lg font-black text-[#000045]">
-                  Login
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#000045" />
+                ) : (
+                  <Text className="text-lg font-black text-[#000045]">
+                    Login
+                  </Text>
+                )}
               </LinearGradient>
             </MotiPressable>
 

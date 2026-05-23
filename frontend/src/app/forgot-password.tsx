@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -14,13 +15,18 @@ import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/hooks/useAuth';
+
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { forgotPassword } = useAuth();
 
   const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const particles = useMemo(
     () =>
@@ -47,13 +53,22 @@ export default function ForgotPasswordScreen() {
     { type: 'diamond', color: '#00BFFF', size: 12, top: '11%', right: '30%' },
   ];
 
-  const handleSendCode = () => {
+  const handleSendCode = async () => {
     if (!email.trim()) return;
 
-    router.push({
-      pathname: '/forgot-password-verify',
-      params: { email },
-    });
+    try {
+      setLoading(true);
+      setError('');
+      await forgotPassword(email.trim());
+      router.push({
+        pathname: '/forgot-password-verify',
+        params: { email: email.trim() },
+      });
+    } catch (error: any) {
+      setError(error.message || 'Unable to send verification code.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -228,16 +243,22 @@ export default function ForgotPasswordScreen() {
               />
             </View>
 
+            {!!error && (
+              <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+                <Text className="text-sm font-semibold text-red-200">{error}</Text>
+              </View>
+            )}
+
             <View className="flex-1" />
 
             <MotiPressable
-              disabled={!email.trim()}
+              disabled={loading || !email.trim()}
               onPress={handleSendCode}
               animate={({ pressed }) => {
                 'worklet';
                 return {
-                  scale: pressed && email.trim() ? 0.97 : 1,
-                  opacity: email.trim() ? 1 : 0.5,
+                  scale: pressed && !loading && email.trim() ? 0.97 : 1,
+                  opacity: loading || !email.trim() ? 0.5 : 1,
                 };
               }}
               style={{ overflow: 'hidden', borderRadius: 9999 }}
@@ -246,10 +267,16 @@ export default function ForgotPasswordScreen() {
                 colors={['#FFD700', '#FFA500']}
                 className="h-14 flex-row items-center justify-center gap-2"
               >
-                <Send color="#000045" size={20} />
-                <Text className="text-lg font-black text-[#000045]">
-                  Send Verification Code
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#000045" />
+                ) : (
+                  <>
+                    <Send color="#000045" size={20} />
+                    <Text className="text-lg font-black text-[#000045]">
+                      Send Verification Code
+                    </Text>
+                  </>
+                )}
               </LinearGradient>
             </MotiPressable>
 

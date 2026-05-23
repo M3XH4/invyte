@@ -1,4 +1,4 @@
-import { Image, Pressable, ScrollView, Text, View, TextInput } from "react-native";
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, Text, View, TextInput } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -15,82 +15,106 @@ import {
 } from "lucide-react-native";
 import { MotiView } from "moti";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useScreenTheme } from "@/hooks/use-screen-theme";
+import { useAuth } from "@/hooks/useAuth";
+import { eventStore, useEventStore } from "@/store/eventStore";
+import type { Event } from "@/types/event";
+import { formatDateForDisplay, formatTimeForDisplay } from "@/utils/dateTime";
+import { normalizeEventRsvpStats } from "@/utils/rsvpStats";
 
-type Event = {
-  id: number;
-  title: string;
-  category: string;
-  date: string;
-  time: string;
-  location: string;
-  coverImage: string;
-  rsvp: {
-    going: number;
-    maybe: number;
-    notGoing: number;
-    pending: number;
-  };
-  totalInvited: number;
-  status: "upcoming" | "ongoing" | "past";
-};
-
-const userEvents: Event[] = [
-  // {
-  //   id: 1,
-  //   title: "Sarah's Birthday Bash",
-  //   category: "birthday",
-  //   date: "2026-07-20",
-  //   time: "7:00 PM",
-  //   location: "123 Party Ave, New York, NY",
-  //   coverImage:
-  //     "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80",
-  //   rsvp: {
-  //     going: 45,
-  //     maybe: 10,
-  //     notGoing: 5,
-  //     pending: 20,
-  //   },
-  //   totalInvited: 80,
-  //   status: "upcoming",
-  // },
-];
+const fallbackCover =
+  "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=900&q=80";
 
 export default function MyEventsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const { isAuthenticated } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState<
-    'all' | 'upcoming' | 'ongoing' | 'past'
+    'all' | 'upcoming' | 'ongoing' | 'past' | 'archived'
   >('all');
 
-  const filteredEvents = useMemo(() => {
-    return userEvents.filter((event) => {
-      const matchesSearch =
-        event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.location.toLowerCase().includes(searchQuery.toLowerCase());
+  const eventsState = useEventStore();
+  const loading = eventsState.isLoadingInitial && eventsState.events.length === 0;
+  const refreshing = eventsState.isRefreshing;
+  const error = eventsState.error;
+  const refresh = () =>
+    statusFilter === 'archived'
+      ? eventStore.refreshEvents({ status: 'archived', per_page: 50 })
+      : eventStore.refreshEvents({ status: 'all', per_page: 50 });
 
-      const matchesStatus =
-        statusFilter === "all" || event.status === statusFilter;
+  useEffect(() => {
+    if (statusFilter === 'archived') {
+      eventStore.fetchArchivedEvents().catch((error) => {
+        if (typeof __DEV__ === 'undefined' || __DEV__) {
+          console.log('[events] failed to load archive', error?.message || error);
+        }
+      });
+    }
+  }, [statusFilter]);
+
+  const events = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    const source = statusFilter === 'archived' ? eventsState.archivedEvents : eventsState.events;
+
+    return source.filter((event) => {
+      const matchesSearch =
+        !query ||
+        event.title.toLowerCase().includes(query) ||
+        categorySlug(event).toLowerCase().includes(query) ||
+        (event.location || event.venue_name || event.venue_address || '').toLowerCase().includes(query);
+      const matchesStatus = statusFilter === 'all' || statusFilter === 'archived' || event.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
-  }, [searchQuery, statusFilter]);
+  }, [eventsState.archivedEvents, eventsState.events, searchQuery, statusFilter]);
+
+  const handleRestoreEvent = async (eventId: string) => {
+    await eventStore.restoreEvent(eventId);
+  };
+
+  const handlePermanentDeleteEvent = async (eventId: string) => {
+    await eventStore.permanentlyDeleteEvent(eventId);
+  };
+
   const calculateResponseRate = (event: Event) => {
-    const totalResponses =
-      event.rsvp.going + event.rsvp.maybe + event.rsvp.notGoing;
+    const stats = normalizeEventRsvpStats({ ...(event.rsvp || {}), totalInvited: event.totalInvited });
+    const totalResponses = stats.going + stats.maybe + stats.notGoing;
 
-    if (event.totalInvited === 0) return 0;
+    if (stats.totalInvited === 0) return 0;
 
-    return Math.round((totalResponses / event.totalInvited) * 100);
+    const responseRate = Math.round((totalResponses / stats.totalInvited) * 100);
+    if (typeof __DEV__ === 'undefined' || __DEV__) {
+      console.log('[events] RSVP progress', {
+        eventId: event.uuid || event.id,
+        totalInvited: stats.totalInvited,
+        going: stats.going,
+        maybe: stats.maybe,
+        notGoing: stats.notGoing,
+        pending: stats.pending,
+        responseRate,
+      });
+    }
+    return responseRate;
+  };
+
+  const handleCreateEvent = () => {
+    if (!isAuthenticated) {
+      router.push('/auth-login');
+      return;
+    }
+
+    router.push("/create-event-categories");
   };
 
   const calculateDaysUntil = (eventDate: string) => {
+    if (!eventDate) return 0;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -110,6 +134,18 @@ export default function MyEventsScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              void refresh().catch((error) => {
+                if (typeof __DEV__ === 'undefined' || __DEV__) {
+                  console.log('[my-events] refresh failed; preserving current events', error?.message || error);
+                }
+              });
+            }}
+          />
+        }
         contentContainerStyle={{
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 130,
@@ -139,17 +175,17 @@ export default function MyEventsScreen() {
           <View className="mb-6 flex-row gap-3">
             <StatsCard
               label="Total Events"
-              value={userEvents.length}
+              value={events.length}
               color="#9333ea"
             />
             <StatsCard
               label="Upcoming"
-              value={userEvents.filter((e) => e.status === "upcoming").length}
+              value={events.filter((e) => e.status === "upcoming").length}
               color="#059669"
             />
             <StatsCard
               label="Total Going"
-              value={userEvents.reduce((sum, e) => sum + e.rsvp.going, 0)}
+              value={events.reduce((sum, e) => sum + (e.rsvp?.going ?? 0), 0)}
               color="#0891b2"
             />
           </View>
@@ -179,7 +215,7 @@ export default function MyEventsScreen() {
           {showFilters && (
             <View className={`mb-5 rounded-2xl border p-1.5 shadow-sm ${theme.surface}`}>
               <View className="flex-row gap-1">
-                {['all', 'upcoming', 'ongoing', 'past'].map((status) => {
+                {['all', 'upcoming', 'ongoing', 'past', 'archived'].map((status) => {
                   const active = statusFilter === status;
 
                   return (
@@ -202,8 +238,35 @@ export default function MyEventsScreen() {
             </View>
           )}
           {/* Events List */}
+          {loading && (
+            <View className="items-center py-12">
+              <ActivityIndicator color="#9333ea" />
+              <Text className={`mt-3 text-sm font-semibold ${theme.subText}`}>
+                Loading events...
+              </Text>
+            </View>
+          )}
+
+          {!!error && !loading && events.length === 0 && (
+            <View className={`mb-5 rounded-2xl border p-4 ${theme.surface}`}>
+              <Text className="mb-3 text-sm font-semibold text-red-500">{error}</Text>
+              <Pressable
+                onPress={() => {
+                  void refresh().catch((error) => {
+                    if (typeof __DEV__ === 'undefined' || __DEV__) {
+                      console.log('[my-events] retry failed; preserving current events', error?.message || error);
+                    }
+                  });
+                }}
+                className="self-start rounded-xl bg-purple-600 px-4 py-2"
+              >
+                <Text className="text-sm font-bold text-white">Try Again</Text>
+              </Pressable>
+            </View>
+          )}
+
           <View className="gap-4">
-            {filteredEvents.map((event, index) => (
+            {events.map((event, index) => (
               <MotiView
                 key={event.id}
                 from={{ opacity: 0, translateY: 20 }}
@@ -219,7 +282,7 @@ export default function MyEventsScreen() {
                     router.push({
                       pathname: "/event-management",
                       params: {
-                        event: JSON.stringify(event),
+                        eventId: event.uuid || event.id,
                       },
                     })
                   }
@@ -228,7 +291,7 @@ export default function MyEventsScreen() {
                   {/* Event Header */}
                   <View className="relative h-32 overflow-hidden">
                     <Image
-                      source={{ uri: event.coverImage }}
+                      source={{ uri: event.coverImage || event.cover_image || fallbackCover }}
                       className="h-full w-full"
                       resizeMode="cover"
                     />
@@ -240,21 +303,21 @@ export default function MyEventsScreen() {
 
                     <View className="absolute left-3 top-3 flex-row items-center gap-2">
                       <Badge
-                        label={capitalize(event.status)}
+                        label={statusFilter === 'archived' || event.is_archived ? 'Archived' : capitalize(event.status)}
                         bg="#f3e8ff"
                         text="#7e22ce"
                       />
                       <Badge
-                        label={capitalize(event.category)}
-                        bg={getCategoryBg(event.category)}
-                        text={getCategoryText(event.category)}
+                        label={capitalize(categorySlug(event))}
+                        bg={getCategoryBg(categorySlug(event))}
+                        text={getCategoryText(categorySlug(event))}
                       />
                     </View>
 
                     {event.status === "upcoming" && (
                       <View className="absolute right-3 top-3 rounded-xl border border-white/40 bg-white/20 px-3 py-2">
                         <Text className="text-center text-2xl font-black leading-none text-white">
-                          {calculateDaysUntil(event.date)}
+                          {calculateDaysUntil(event.date || event.start_date || '')}
                         </Text>
                         <Text className="text-[9px] font-bold uppercase text-white/80">
                           Days
@@ -275,7 +338,7 @@ export default function MyEventsScreen() {
                       <View className="flex-row items-center gap-2">
                         <Calendar color={theme.iconColor} size={16} />
                         <Text className={`text-sm font-semibold ${theme.subText}`}>
-                          {event.date} • {event.time}
+                          {formatDateForDisplay(event.date || event.start_date || '') || 'Date TBD'} • {formatTimeForDisplay(event.time || event.start_time || '') || 'Time TBD'}
                         </Text>
                       </View>
 
@@ -285,7 +348,7 @@ export default function MyEventsScreen() {
                           numberOfLines={1}
                           className={`flex-1 text-sm font-semibold ${theme.subText}`}
                         >
-                          {event.location}
+                          {event.location || event.venue_name || event.venue_address || 'Location TBD'}
                         </Text>
                       </View>
                     </View>
@@ -304,19 +367,19 @@ export default function MyEventsScreen() {
                         <View
                           className="h-full bg-emerald-500"
                           style={{
-                            width: `${(event.rsvp.going / event.totalInvited) * 100}%`,
+                            width: `${event.totalInvited ? ((event.rsvp?.going ?? 0) / event.totalInvited) * 100 : 0}%`,
                           }}
                         />
                         <View
                           className="h-full bg-amber-500"
                           style={{
-                            width: `${(event.rsvp.maybe / event.totalInvited) * 100}%`,
+                            width: `${event.totalInvited ? ((event.rsvp?.maybe ?? 0) / event.totalInvited) * 100 : 0}%`,
                           }}
                         />
                         <View
                           className="h-full bg-red-500"
                           style={{
-                            width: `${(event.rsvp.notGoing / event.totalInvited) * 100}%`,
+                            width: `${event.totalInvited ? ((event.rsvp?.notGoing ?? event.rsvp?.not_going ?? 0) / event.totalInvited) * 100 : 0}%`,
                           }}
                         />
                       </View>
@@ -325,32 +388,57 @@ export default function MyEventsScreen() {
                         <RsvpCount
                           icon={CheckCircle}
                           color="#059669"
-                          value={event.rsvp.going}
+                          value={event.rsvp?.going ?? 0}
                         />
                         <RsvpCount
                           icon={HelpCircle}
                           color="#d97706"
-                          value={event.rsvp.maybe}
+                          value={event.rsvp?.maybe ?? 0}
                         />
                         <RsvpCount
                           icon={XCircle}
                           color="#dc2626"
-                          value={event.rsvp.notGoing}
+                          value={event.rsvp?.notGoing ?? event.rsvp?.not_going ?? 0}
                         />
                         <RsvpCount
                           icon={Clock}
                           color="#9333ea"
-                          value={event.rsvp.pending}
+                          value={event.rsvp?.pending ?? 0}
                         />
                       </View>
                     </View>
 
-                    <View className={`h-10 flex-row items-center justify-center gap-2 rounded-xl ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}>
-                      <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
-                        View Details
-                      </Text>
-                      <ChevronRight color={theme.isDarkMode ? '#d8b4fe' : '#7e22ce'} size={16} />
-                    </View>
+                    {statusFilter === 'archived' || event.is_archived ? (
+                      <View className="flex-row gap-3">
+                        <Pressable
+                          onPress={() => {
+                            void handleRestoreEvent(event.uuid || event.id);
+                          }}
+                          className={`h-10 flex-1 items-center justify-center rounded-xl ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}
+                        >
+                          <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                            Restore
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            void handlePermanentDeleteEvent(event.uuid || event.id);
+                          }}
+                          className="h-10 flex-1 items-center justify-center rounded-xl bg-red-500/15"
+                        >
+                          <Text className="text-sm font-bold text-red-500">
+                            Delete Permanently
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View className={`h-10 flex-row items-center justify-center gap-2 rounded-xl ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}>
+                        <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                          View Details
+                        </Text>
+                        <ChevronRight color={theme.isDarkMode ? '#d8b4fe' : '#7e22ce'} size={16} />
+                      </View>
+                    )}
                   </View>
                 </Pressable>
               </MotiView>
@@ -358,24 +446,24 @@ export default function MyEventsScreen() {
           </View>
 
           {/* Empty State */}
-          {filteredEvents.length === 0 && (
+          {!loading && !refreshing && !error && events.length === 0 && (
             <View className="items-center py-12">
               <View className={`mb-4 h-20 w-20 items-center justify-center rounded-full ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-100'}`}>
                 <Calendar color={theme.isDarkMode ? '#d8b4fe' : '#9333ea'} size={40} />
               </View>
 
               <Text className={`mb-2 text-lg font-black ${theme.headerText}`}>
-                {userEvents.length === 0 ? 'No Events Yet' : 'No Events Found'}
+                {!searchQuery && statusFilter === 'all' ? 'No Events Yet' : 'No Events Found'}
               </Text>
 
               <Text className={`mb-6 text-sm ${theme.subText}`}>
-                {userEvents.length === 0
+                {!searchQuery && statusFilter === 'all'
                   ? 'Create your first event to get started!'
                   : 'Try changing your search or filter.'}
               </Text>
 
               <Pressable
-                onPress={() => router.push("/create-event-categories")}
+                onPress={handleCreateEvent}
                 className="overflow-hidden rounded-2xl shadow-lg"
               >
                 <LinearGradient
@@ -462,7 +550,13 @@ function RsvpCount({
 }
 
 function capitalize(value: string) {
+  if (!value) return '';
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function categorySlug(event: Event) {
+  if (typeof event.category === 'string') return event.category;
+  return event.category_slug || event.category?.slug || 'event';
 }
 
 function getCategoryBg(category: string) {

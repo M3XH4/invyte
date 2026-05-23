@@ -14,7 +14,15 @@ type DecorativeElement = {
 const invyteLogo = require("@/assets/images/invyte-logo.png");
 const kidInARocket = require("@/assets/images/kid-in-a-rocket.png");
 
-export default function NetworkFallback({ onRetry }: { onRetry: () => void }) {
+export default function NetworkFallback({
+  onRetry,
+  apiUrl,
+  error,
+}: {
+  onRetry: () => void;
+  apiUrl?: string;
+  error?: string;
+}) {
   const insets = useSafeAreaInsets();
 
   const decorativeElements: DecorativeElement[] = [
@@ -143,6 +151,30 @@ export default function NetworkFallback({ onRetry }: { onRetry: () => void }) {
         >
           Please check your internet connection or make sure your Laravel API is running.
         </MotiText>
+
+        {!!apiUrl && (
+          <MotiText
+            from={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 450 }}
+            className="text-white/60 text-center text-xs mt-3"
+            style={{ fontFamily: "PoppinsRegular" }}
+          >
+            API: {apiUrl}/health
+          </MotiText>
+        )}
+
+        {!!error && (
+          <MotiText
+            from={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 500 }}
+            className="text-red-200 text-center text-xs mt-2 px-4"
+            style={{ fontFamily: "PoppinsRegular" }}
+          >
+            {error}
+          </MotiText>
+        )}
       </View>
 
       <Pressable

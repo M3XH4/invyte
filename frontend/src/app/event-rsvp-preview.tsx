@@ -1,8 +1,8 @@
 // app/rsvp-preview.tsx
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -28,22 +28,12 @@ import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { eventsApi } from '@/api/eventsApi';
+import type { Event } from '@/types/event';
+import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 
 const fallbackCover =
   'https://www.magicjumprentals.com/clients/3/assets/girl_birthday_party.jpg';
-
-const rsvpQuestions = [
-  {
-    id: 1,
-    question: 'Food preference',
-    placeholder: 'Vegetarian, Vegan, No preference',
-  },
-  {
-    id: 2,
-    question: 'Song request',
-    placeholder: 'What song gets you dancing?',
-  },
-];
 
 const responseOptions = [
   {
@@ -67,7 +57,7 @@ const responseOptions = [
     border: '#fde68a',
   },
   {
-    value: 'cant-go',
+    value: 'not_going',
     label: "Can't Go",
     subtitle: "Can't make it",
     icon: XCircle,
@@ -82,36 +72,51 @@ export default function RSVPPreviewScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
-  const { event } = useLocalSearchParams<{ event?: string }>();
-
-  const selectedEvent = event ? JSON.parse(event) : null;
+  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const [event, setEvent] = useState<Event | null>(null);
+  const [loading, setLoading] = useState(!!eventId);
+  const [error, setError] = useState('');
 
   const [selectedResponse, setSelectedResponse] = useState<
-    'going' | 'maybe' | 'cant-go' | null
+    'going' | 'maybe' | 'not_going' | null
   >(null);
+  const [guestName, setGuestName] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
   const [additionalGuests, setAdditionalGuests] = useState('0');
-  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        if (eventId) setEvent(await eventsApi.rsvpPreview(eventId));
+      } catch (error: any) {
+        setError(error.message || 'Unable to load RSVP preview.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [eventId]);
 
   const eventDetails = {
-    title: selectedEvent?.title ?? "Aryan's Birthday",
-    date: selectedEvent?.date ?? 'May 28, 2026',
-    time: selectedEvent?.time ?? '7:00 PM',
+    title: event?.title ?? "Event",
+    date: formatDateForDisplay(event?.date || event?.start_date || '') || 'Event date',
+    time: formatTimeForDisplay(event?.time || event?.start_time || '') || 'Event time',
     location:
-      selectedEvent?.location ??
-      selectedEvent?.venue ??
-      'The Grove Resort, Davao City',
+      event?.location || event?.venue_address || 'Event location',
     description:
-      selectedEvent?.description ??
-      "Let's celebrate and make awesome memories together! Join us for an unforgettable night filled with fun, laughter, and great vibes.",
-    coverImage: selectedEvent?.coverImage ?? fallbackCover,
-    organizer: selectedEvent?.organizer ?? 'Argyle',
+      event?.description || "Let's celebrate and make awesome memories together!",
+    coverImage: event?.coverImage || event?.cover_image || fallbackCover,
+    organizer: 'Host',
   };
 
-  const handleSubmit = () => {
-    Alert.alert(
-      'Preview Mode',
-      'This is a preview! Your guests will submit their RSVP responses here.'
-    );
+  const handleSubmit = async () => {
+    if (!selectedResponse) return;
+
+    setError('Preview mode only. Scan the QR code or open the public RSVP link to submit a real RSVP.');
   };
 
   return (
@@ -132,7 +137,7 @@ export default function RSVPPreviewScreen() {
               onPress={() =>
                 router.push({
                   pathname: '/event-management',
-                  params: { event },
+                  params: { eventId },
                 })
               }
               className={`h-11 w-11 items-center justify-center rounded-2xl border shadow-sm ${theme.iconButton}`}
@@ -146,6 +151,19 @@ export default function RSVPPreviewScreen() {
 
             <View className="h-11 w-11" />
           </View>
+
+          {loading && (
+            <View className={`mb-6 rounded-[24px] border p-5 ${theme.surface}`}>
+              <ActivityIndicator color="#9333ea" />
+              <Text className={`mt-2 text-center text-sm font-semibold ${theme.subText}`}>Loading RSVP preview...</Text>
+            </View>
+          )}
+
+          {!!error && (
+            <View className={`mb-6 rounded-[24px] border p-5 ${theme.surface}`}>
+              <Text className="text-sm font-semibold text-red-500">{error}</Text>
+            </View>
+          )}
 
           <MotiView
             from={{ scale: 0.96, opacity: 0 }}
@@ -162,7 +180,7 @@ export default function RSVPPreviewScreen() {
                   Guest Preview Mode
                 </Text>
                 <Text className={`text-xs font-medium ${theme.subText}`}>
-                  This is what your guests will see
+                  Host-only preview. Submissions are disabled here.
                 </Text>
               </View>
             </View>
@@ -288,7 +306,35 @@ export default function RSVPPreviewScreen() {
               })}
             </View>
 
-            {selectedResponse === 'going' && (
+            {selectedResponse && (
+              <View className="mb-4 gap-3">
+                <View>
+                  <Text className="mb-2 text-sm font-bold text-gray-700">
+                    Your Name
+                  </Text>
+                  <Input
+                    value={guestName}
+                    onChangeText={setGuestName}
+                    placeholder="Enter your name"
+                  />
+                </View>
+
+                <View>
+                  <Text className="mb-2 text-sm font-bold text-gray-700">
+                    Email
+                  </Text>
+                  <Input
+                    value={guestEmail}
+                    onChangeText={setGuestEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    placeholder="you@example.com"
+                  />
+                </View>
+              </View>
+            )}
+
+            {selectedResponse === 'going' && event?.allow_plus_ones && (
               <View className="mb-4">
                 <Text className="mb-2 text-sm font-bold text-gray-700">
                   Additional Guests
@@ -303,14 +349,14 @@ export default function RSVPPreviewScreen() {
             )}
           </Card>
 
-          {selectedResponse && selectedResponse !== 'cant-go' && (
+          {selectedResponse && selectedResponse !== 'not_going' && (
             <Card>
               <Text className="mb-4 text-lg font-black text-gray-900">
                 Additional Information
               </Text>
 
               <View className="gap-4">
-                {rsvpQuestions.map((question) => (
+                {(event?.questions || []).map((question) => (
                   <View key={question.id}>
                     <Text className="mb-2 text-sm font-bold text-gray-700">
                       {question.question}

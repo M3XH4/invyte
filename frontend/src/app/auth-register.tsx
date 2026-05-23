@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -21,6 +22,8 @@ import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/hooks/useAuth';
+
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 
 const googleLogo = {
@@ -38,10 +41,18 @@ const facebookLogo = {
 export default function SignUpScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { register, loading } = useAuth();
 
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<string[]>([]);
 
   const particles = useMemo(
     () =>
@@ -67,6 +78,47 @@ export default function SignUpScreen() {
     { type: 'diamond', color: '#FFD700', size: 12, top: '7%', left: '30%' },
     { type: 'diamond', color: '#00BFFF', size: 12, top: '7%', right: '30%' },
   ];
+
+  const handleRegister = async () => {
+    if (!name.trim() || !email.trim() || !password || !passwordConfirmation || !acceptedTerms) return;
+
+    if (password !== passwordConfirmation) {
+      setError('Passwords do not match.');
+      setFieldErrors([]);
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      setFieldErrors([]);
+      return;
+    }
+
+    const normalizedUsername = username
+      .trim()
+      .replace(/^@/, '')
+      .replace(/\s+/g, '_')
+      .toLowerCase();
+
+    try {
+      setError('');
+      setFieldErrors([]);
+      await register({
+        name: name.trim(),
+        username: normalizedUsername || undefined,
+        email: email.trim(),
+        password,
+        password_confirmation: passwordConfirmation,
+      });
+    } catch (error: any) {
+      setError(error.message || 'Unable to create account. Please try again.');
+      setFieldErrors(
+        error.errors
+          ? Object.values(error.errors).flat().map(String)
+          : [],
+      );
+    }
+  };
 
   return (
     <View className="flex-1 bg-[#000045]">
@@ -213,20 +265,26 @@ export default function SignUpScreen() {
             transition={{ type: 'timing', delay: 400, duration: 500 }}
             className="gap-4 pb-8"
           >
-            <InputWithIcon icon={User} placeholder="Full Name" />
+            <InputWithIcon icon={User} value={name} onChangeText={setName} placeholder="Full Name" />
             <InputWithIcon
               icon={Mail}
+              value={email}
+              onChangeText={setEmail}
               placeholder="Email Address"
               keyboardType="email-address"
               autoCapitalize="none"
             />
             <InputWithIcon
               icon={User}
+              value={username}
+              onChangeText={setUsername}
               placeholder="Username"
               autoCapitalize="none"
             />
 
             <PasswordInput
+              value={password}
+              onChangeText={setPassword}
               placeholder="Password"
               secureTextEntry={!showPassword}
               showPassword={showPassword}
@@ -234,6 +292,8 @@ export default function SignUpScreen() {
             />
 
             <PasswordInput
+              value={passwordConfirmation}
+              onChangeText={setPasswordConfirmation}
               placeholder="Confirm Password"
               secureTextEntry={!showConfirmPassword}
               showPassword={showConfirmPassword}
@@ -270,21 +330,40 @@ export default function SignUpScreen() {
               </Text>
             </Pressable>
 
+            {!!error && (
+              <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+                <Text className="text-sm font-semibold text-red-200">{error}</Text>
+                {fieldErrors.map((message) => (
+                  <Text key={message} className="mt-1 text-xs font-medium text-red-100">
+                    {message}
+                  </Text>
+                ))}
+              </View>
+            )}
+
             <View className="mt-4 overflow-hidden rounded-full">
               <MotiPressable
-                onPress={() => router.replace('/tabs')}
+                disabled={loading || !acceptedTerms}
+                onPress={handleRegister}
                 animate={({ pressed }) => {
                   'worklet';
-                  return { scale: pressed ? 0.97 : 1 };
+                  return {
+                    scale: pressed && !loading ? 0.97 : 1,
+                    opacity: loading || !acceptedTerms ? 0.6 : 1,
+                  };
                 }}
               >
                 <LinearGradient
                   colors={['#FFD700', '#FFA500']}
                   className="h-14 items-center justify-center"
                 >
-                  <Text className="text-lg font-black text-[#000045]">
-                    Sign Up
-                  </Text>
+                  {loading ? (
+                    <ActivityIndicator color="#000045" />
+                  ) : (
+                    <Text className="text-lg font-black text-[#000045]">
+                      Sign Up
+                    </Text>
+                  )}
                 </LinearGradient>
               </MotiPressable>
             </View>

@@ -1,5 +1,5 @@
 import { Share, ScrollView, Text, View, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Calendar,
@@ -17,6 +17,8 @@ import {
 import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEvent } from '@/hooks/useEvents';
+import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 
 const sparklePositions = [
   { left: '8%', top: '14%' },
@@ -41,12 +43,21 @@ const starPositions = [
 export default function InvitationCardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const { event } = useEvent(eventId);
+
+  const title = event?.title ?? "Your Event";
+  const rawDate = event?.date || event?.start_date || '';
+  const rawTime = event?.time || event?.start_time || '';
+  const date = formatDateForDisplay(rawDate) || 'Event date';
+  const time = formatTimeForDisplay(rawTime) || 'Event time';
+  const location = event?.location || event?.venue_address || 'Event location';
+  const description = event?.description || 'Join us for an unforgettable celebration filled with fun, laughter, and amazing memories!';
 
   const handleShare = async () => {
     await Share.share({
-      title: "Sarah's Birthday Bash",
-      message:
-        "You're invited to Sarah's Birthday Bash! May 24, 2026 at 7:00 PM, Central Park, NY.",
+      title,
+      message: `You're invited to ${title}! ${date} at ${time}, ${location}.`,
     });
   };
 
@@ -207,7 +218,7 @@ export default function InvitationCardScreen() {
                     </Text>
 
                     <Text className="px-4 text-center text-3xl font-black leading-tight text-white">
-                      Sarah&apos;s Birthday Bash
+                      {title}
                     </Text>
                   </View>
 
@@ -225,23 +236,22 @@ export default function InvitationCardScreen() {
                     <View className="gap-3">
                       <InfoRow
                         icon={Calendar}
-                        label="May 24, 2026"
+                        label={date}
                       />
                       <InfoRow
                         icon={Clock}
-                        label="7:00 PM - 11:00 PM"
+                        label={time}
                       />
                       <InfoRow
                         icon={MapPin}
-                        label="Central Park, NY"
+                        label={location}
                       />
                     </View>
                   </MotiView>
 
                   <View className="mb-4 px-2">
                     <Text className="text-center text-xs font-medium leading-5 text-white/90">
-                      Join us for an unforgettable celebration filled with fun,
-                      laughter, music, and amazing memories!
+                      {description}
                     </Text>
                   </View>
 
@@ -264,7 +274,12 @@ export default function InvitationCardScreen() {
           >
             <View className="overflow-hidden rounded-[24px]">
               <MotiPressable
-                onPress={() => router.push('/event-management')}
+                onPress={() =>
+                  router.push({
+                    pathname: '/event-management',
+                    params: { eventId },
+                  })
+                }
                 animate={({ pressed }) => {
                   'worklet';
                   return { scale: pressed ? 0.97 : 1 };
@@ -298,7 +313,12 @@ export default function InvitationCardScreen() {
             </View>
 
             <MotiPressable
-              onPress={() => router.push('/tabs')}
+              onPress={() =>
+                router.push({
+                  pathname: '/qr-invitation',
+                  params: { eventId },
+                })
+              }
               animate={({ pressed }) => {
                 'worklet';
                 return { scale: pressed ? 0.97 : 1 };

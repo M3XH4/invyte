@@ -33,14 +33,19 @@ import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { eventsApi } from '@/api/eventsApi';
+import { useEvent } from '@/hooks/useEvents';
+import { eventStore } from '@/store/eventStore';
+import { safeRun } from '@/utils/safeRun';
 
 export default function EventManagementSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
-  const { event } = useLocalSearchParams<{ event?: string }>();
-
-  const selectedEvent = event ? JSON.parse(event) : null;
+  const { eventId, event } = useLocalSearchParams<{ eventId?: string; event?: string }>();
+  const legacyEvent = parseLegacyEvent(event);
+  const resolvedEventId = eventId || legacyEvent?.uuid || legacyEvent?.id;
+  const { event: selectedEvent } = useEvent(resolvedEventId);
 
   const [eventNotifications, setEventNotifications] = useState(true);
   const [rsvpUpdates, setRsvpUpdates] = useState(true);
@@ -50,6 +55,7 @@ export default function EventManagementSettingsScreen() {
   const [showGuestList, setShowGuestList] = useState(true);
   const [isArchived, setIsArchived] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [screenError, setScreenError] = useState('');
 
   const cyclePrivacy = () => {
     const options = ['public', 'private', 'invite-only'];
@@ -59,8 +65,29 @@ export default function EventManagementSettingsScreen() {
 
   const handleShareLink = async () => {
     await Share.share({
-      message: 'https://invyte.app/e/abc123',
+      message: selectedEvent?.qr?.public_url || selectedEvent?.qr?.url || selectedEvent?.slug || 'Invite link is not ready yet.',
     });
+  };
+
+  const handleArchive = async (value: boolean) => {
+    if (!resolvedEventId) throw new Error('Event not found.');
+    setIsArchived(value);
+    if (value) await eventStore.archiveEvent(resolvedEventId);
+    else await eventStore.restoreEvent(resolvedEventId);
+  };
+
+  const handleDuplicate = async () => {
+    if (!resolvedEventId) throw new Error('Event not found.');
+    const duplicated = await eventsApi.duplicate(resolvedEventId);
+    eventStore.addEvent(duplicated);
+    router.replace({ pathname: '/event-management', params: { eventId: duplicated.uuid || duplicated.id } });
+  };
+
+  const handleDelete = async () => {
+    if (!resolvedEventId) throw new Error('Event not found.');
+    await eventStore.archiveEvent(resolvedEventId);
+    setShowDeleteModal(false);
+    router.replace('/tabs/events');
   };
 
   const settingsSections = [
@@ -157,7 +184,7 @@ export default function EventManagementSettingsScreen() {
           onPress: () => {
             router.push({
               pathname: '/qr-invitation',
-              params: { event },
+              params: { eventId: resolvedEventId },
             });
           },
         },
@@ -180,7 +207,9 @@ export default function EventManagementSettingsScreen() {
           label: 'Duplicate Event',
           description: 'Create a copy of this event',
           colors: ['#a78bfa', '#7c3aed'],
-          onPress: () => Alert.alert('Duplicated', 'Event duplicated successfully.'),
+          onPress: () => {
+            void safeRun(handleDuplicate, 'Failed to duplicate event.', setScreenError);
+          },
         },
         {
           id: 'archive',
@@ -190,7 +219,9 @@ export default function EventManagementSettingsScreen() {
           colors: ['#fbbf24', '#d97706'],
           toggle: true,
           value: isArchived,
-          onChange: setIsArchived,
+          onChange: (value: boolean) => {
+            void safeRun(() => handleArchive(value), 'Failed to archive event.', setScreenError);
+          },
         },
         {
           id: 'export',
@@ -233,7 +264,7 @@ export default function EventManagementSettingsScreen() {
                 else router.replace({
                   pathname: '/event-management',
                   params: {
-                    event,
+                    eventId: resolvedEventId,
                   },
                 })
               }}
@@ -269,7 +300,7 @@ export default function EventManagementSettingsScreen() {
 
                 <View className="flex-1">
                   <Text className="mb-0.5 text-xl font-black text-white">
-                    {selectedEvent?.title || 'Event Name'}
+                  {selectedEvent?.title || 'Event Name'}
                   </Text>
                   <Text className="text-sm font-medium text-white/70">
                     Customize event preferences
@@ -349,8 +380,14 @@ export default function EventManagementSettingsScreen() {
             </View>
           ))}
 
+          {!!screenError && (
+            <View className={`mb-4 rounded-[20px] border p-4 ${theme.surface}`}>
+              <Text className="text-sm font-semibold text-red-500">{screenError}</Text>
+            </View>
+          )}
+
           <MotiPressable
-            onPress={() => router.replace('/event-management')}
+            onPress={() => router.replace({ pathname: '/event-management', params: { eventId: resolvedEventId } })}
             from={{ opacity: 0, translateY: 10 }}
             animate={({ pressed }) => {
               'worklet';
@@ -383,8 +420,7 @@ export default function EventManagementSettingsScreen() {
         visible={showDeleteModal}
         onCancel={() => setShowDeleteModal(false)}
         onDelete={() => {
-          setShowDeleteModal(false);
-          router.replace('/tabs/events');
+          void safeRun(handleDelete, 'Failed to delete event.', setScreenError);
         }}
       />
     </View>
@@ -452,4 +488,13 @@ function DeleteEventModal({
       </View>
     </Modal>
   );
+}
+
+function parseLegacyEvent(value?: string) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }

@@ -5,7 +5,6 @@ import {
   Award,
   Calendar,
   Crown,
-  Plus,
   Settings,
   Star,
   Target,
@@ -16,91 +15,37 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
-import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
-
-type User = {
-  name: string;
-  username: string;
-  avatar: string;
-  eventsHosted: number;
-  guestsInvited: number;
-  attendanceRate: string;
-  badge: string;
-};
-const achievements = [
-  {
-    id: 1,
-    icon: Trophy,
-    title: 'Event Master',
-    description: 'Created 10+ events',
-    unlocked: true,
-    colors: ['#facc15', '#f97316'],
-  },
-  {
-    id: 2,
-    icon: Star,
-    title: 'People Magnet',
-    description: 'Invited 100+ guests',
-    unlocked: true,
-    colors: ['#f472b6', '#e11d48'],
-  },
-  {
-    id: 3,
-    icon: Zap,
-    title: 'High Energy Host',
-    description: '90% RSVP rate',
-    unlocked: true,
-    colors: ['#f87171', '#f97316'],
-  },
-  {
-    id: 4,
-    icon: Target,
-    title: 'Early Bird',
-    description: 'Planned 30 days ahead',
-    unlocked: true,
-    colors: ['#60a5fa', '#06b6d4'],
-  },
-  {
-    id: 5,
-    icon: Crown,
-    title: 'Premium Host',
-    description: 'Use all themes',
-    unlocked: false,
-    colors: ['#c084fc', '#ec4899'],
-  },
-  {
-    id: 6,
-    icon: Award,
-    title: 'Perfect Planner',
-    description: 'Zero cancellations',
-    unlocked: false,
-    colors: ['#4ade80', '#10b981'],
-  },
-];
-
-// const user : User | null = null;
-
-// Example authenticated user:
-const user = {
-  name: 'Argyle',
-  username: '@argyle_events',
-  avatar:
-    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjGZJiVjkYNcKy7wX1h1Rz-5Hjgn6wn4S9Jw&s',
-  eventsHosted: 12,
-  guestsInvited: 248,
-  attendanceRate: '94%',
-  badge: 'Top Host',
-};
+import { profileApi, type ProfileStats } from '@/api/profileApi';
+import { useAuth } from '@/hooks/useAuth';
+import { buildAchievements } from '@/utils/achievements';
+import type { Achievement } from '@/types/achievement';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const { user, isAuthenticated } = useAuth();
+  const [stats, setStats] = useState<ProfileStats | null>(null);
+  const [error, setError] = useState('');
 
-  const isAuthenticated = !!user;
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const loadStats = async () => {
+      try {
+        setError('');
+        setStats(await profileApi.stats());
+      } catch (error: any) {
+        setError(error.message || 'Unable to load profile stats.');
+      }
+    };
+
+    loadStats();
+  }, [isAuthenticated]);
 
   return (
     <View className={`flex-1 ${theme.page}`}>
@@ -134,7 +79,7 @@ export default function ProfileScreen() {
 
           {!isAuthenticated ? (
             <GuestProfileFallback />
-          ) : (
+          ) : user ? (
             <>
               {/* Profile Hero Card */}
               <MotiView
@@ -153,8 +98,8 @@ export default function ProfileScreen() {
                   <View className="absolute left-5 right-5 top-5 z-10 flex-row items-start gap-4">
                     <View className="relative">
                       <Image
-                        source={{ uri: user.avatar }}
-                        className="h-[72px] w-[72px] rounded-[24px]"
+                        source={{ uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte') }}
+                        className="h-16 w-16 rounded-full"
                       />
 
                       <View className="absolute bottom-1 right-1 h-4 w-4 rounded-full border-2 border-white bg-emerald-400" />
@@ -166,16 +111,17 @@ export default function ProfileScreen() {
                       </Text>
 
                       <Text className="mb-2 text-sm font-medium text-white/70">
-                        {user.username}
+                        {user.username ? `@${user.username.replace('@', '')}` : user.email}
                       </Text>
 
                       <LinearGradient
                         colors={['#facc15', '#fb923c']}
-                        className="self-start flex-row items-center gap-1.5 rounded-full px-3 py-1.5"
+                        className="self-start flex-row items-center gap-1.5 px-3 py-1.5"
+                        style={{ borderRadius: 9999 }}
                       >
                         <Star color="white" size={14} fill="white" />
                         <Text className="text-xs font-black text-white">
-                          {user.badge}
+                          {user.role === 'admin' ? 'Admin' : 'Host'}
                         </Text>
                       </LinearGradient>
                     </View>
@@ -184,25 +130,33 @@ export default function ProfileScreen() {
                   <View className="absolute left-0 right-0 top-[120px] z-10 flex-row justify-center gap-3">
                     <ProfileStat
                       icon={Calendar}
-                      value={user.eventsHosted}
+                      value={stats?.events_hosted ?? 0}
                       label="Events"
                     />
                     <ProfileStat
                       icon={Users}
-                      value={user.guestsInvited}
+                      value={stats?.guests_invited ?? 0}
                       label="Guests"
                     />
                     <ProfileStat
                       icon={TrendingUp}
-                      value={user.attendanceRate}
+                      value={stats?.attendance_rate ?? '0%'}
                       label="Rate"
                     />
                   </View>
                 </LinearGradient>
               </MotiView>
 
-              <AchievementsSection />
+              <AchievementsSection stats={stats} />
+
+              {!!error && (
+                <View className={`rounded-2xl border p-4 ${theme.surface}`}>
+                  <Text className="text-sm font-semibold text-red-500">{error}</Text>
+                </View>
+              )}
             </>
+          ) : (
+            <GuestProfileFallback />
           )}
         </View>
       </ScrollView>
@@ -276,8 +230,10 @@ function ProfileStat({
   );
 }
 
-function AchievementsSection() {
+function AchievementsSection({ stats }: { stats: ProfileStats | null }) {
+  const router = useRouter();
   const theme = useScreenTheme();
+  const achievements = buildAchievements(stats);
   const unlockedCount = achievements.filter((item) => item.unlocked).length;
 
   return (
@@ -290,14 +246,16 @@ function AchievementsSection() {
           </Text>
         </View>
 
-        <Text className={`text-sm font-bold ${theme.mutedText}`}>
-          {unlockedCount}/{achievements.length} completed
-        </Text>
+        <Pressable onPress={() => router.push('/achievements' as any)}>
+          <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-fuchsia-300' : 'text-purple-600'}`}>
+            {unlockedCount}/{achievements.length} completed
+          </Text>
+        </Pressable>
       </View>
 
       <View className="flex-row flex-wrap justify-between gap-y-4">
         {achievements.slice(0, 4).map((achievement, index) => {
-          const Icon = achievement.icon;
+          const Icon = achievementIcon(achievement);
 
           return (
             <MotiView
@@ -354,4 +312,19 @@ function AchievementsSection() {
       </View>
     </View>
   );
+}
+
+function achievementIcon(achievement: Achievement) {
+  const icons = {
+    trophy: Trophy,
+    star: Star,
+    zap: Zap,
+    target: Target,
+    crown: Crown,
+    award: Award,
+    calendar: Calendar,
+    users: Users,
+  };
+
+  return icons[achievement.iconName] || Award;
 }

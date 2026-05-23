@@ -1,11 +1,15 @@
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft } from 'lucide-react-native';
 import { MotiView } from 'moti';
+import { useCallback, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { categoryStore, useCategoryStore } from '@/store/categoryStore';
+import { createEventStore } from '@/store/createEventStore';
+import type { EventCategory } from '@/types/event';
 
 const birthdayIcon = require('@/assets/images/transparent-birthday-icon.png');
 const weddingIcon = require('@/assets/images/transparent-wedding-icon.png');
@@ -15,27 +19,57 @@ const seminarIcon = require('@/assets/images/transparent-seminar-icon.png');
 const reunionIcon = require('@/assets/images/transparent-reunion-icon.png');
 const funeralIcon = require('@/assets/images/transparent-funeral-icon.png');
 
-const categories = [
-  { id: 'birthday', name: 'Birthday', icon: birthdayIcon, colors: ['#f472b6', '#db2777'] },
-  { id: 'wedding', name: 'Wedding', icon: weddingIcon, colors: ['#c084fc', '#9333ea'] },
-  { id: 'party', name: 'Party', icon: partyIcon, colors: ['#fb923c', '#ea580c'] },
-  { id: 'meeting', name: 'Meeting', icon: meetingIcon, colors: ['#22d3ee', '#0891b2'] },
-  { id: 'seminar', name: 'Seminar', icon: seminarIcon, colors: ['#818cf8', '#4f46e5'] },
-  { id: 'reunion', name: 'Reunion', icon: reunionIcon, colors: ['#4ade80', '#16a34a'] },
-  { id: 'funeral', name: 'Funeral', icon: funeralIcon, colors: ['#6b7280', '#374151'] },
-  { id: 'concert', name: 'Concert', icon: partyIcon, colors: ['#fb7185', '#e11d48'] },
-  { id: 'sports', name: 'Sports', icon: meetingIcon, colors: ['#60a5fa', '#2563eb'] },
-  { id: 'gaming', name: 'Gaming', icon: partyIcon, colors: ['#a78bfa', '#7c3aed'] },
-  { id: 'graduation', name: 'Graduation', icon: seminarIcon, colors: ['#facc15', '#ca8a04'] },
-  { id: 'other', name: 'Other', icon: meetingIcon, colors: ['#94a3b8', '#475569'] },
-];
+type CategoryOption = {
+  id: string;
+  name: string;
+  icon: any;
+  colors: string[];
+};
+
+const categoryDisplay: Record<string, { icon: any; colors: string[] }> = {
+  birthday: { icon: birthdayIcon, colors: ['#f472b6', '#db2777'] },
+  wedding: { icon: weddingIcon, colors: ['#c084fc', '#9333ea'] },
+  party: { icon: partyIcon, colors: ['#fb923c', '#ea580c'] },
+  meeting: { icon: meetingIcon, colors: ['#22d3ee', '#0891b2'] },
+  seminar: { icon: seminarIcon, colors: ['#818cf8', '#4f46e5'] },
+  reunion: { icon: reunionIcon, colors: ['#4ade80', '#16a34a'] },
+  funeral: { icon: funeralIcon, colors: ['#6b7280', '#374151'] },
+};
 
 export default function CreateEventCategoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const categoryState = useCategoryStore();
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [loading, setLoading] = useState(!categoryState.isInitialLoaded);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadCategories = useCallback(async (refresh = false) => {
+    if (refresh) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      setError('');
+      const apiCategories = categoryState.isInitialLoaded && !refresh
+        ? categoryState.categories
+        : await categoryStore.fetchCategories({ refresh });
+      setCategories(apiCategories.map(mapCategory));
+    } catch (error: any) {
+      setError(error.message || 'Unable to load categories.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [categoryState.categories, categoryState.isInitialLoaded]);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
 
   const handleCategorySelect = (categoryId: string) => {
+    createEventStore.reset({ categorySlug: categoryId });
     router.push(`/create-event-details?category=${categoryId}`);
   };
 
@@ -47,6 +81,7 @@ export default function CreateEventCategoryScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadCategories(true)} />}
         contentContainerStyle={{
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 24,
@@ -88,6 +123,33 @@ export default function CreateEventCategoryScreen() {
           </View>
 
           <View className="flex-row flex-wrap gap-4">
+            {loading && (
+              <View className="w-full items-center py-8">
+                <ActivityIndicator color="#9333ea" />
+                <Text className={`mt-2 text-sm font-semibold ${theme.subText}`}>Loading categories...</Text>
+              </View>
+            )}
+
+            {!!error && (
+              <View className={`mb-4 w-full rounded-2xl border p-4 ${theme.surface}`}>
+                <Text className="text-sm font-semibold text-red-500">{error}</Text>
+                <Pressable onPress={() => loadCategories(true)} className="mt-3 self-start rounded-xl bg-purple-600 px-4 py-2">
+                  <Text className="text-sm font-bold text-white">Retry</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {!loading && !error && categories.length === 0 && (
+              <View className={`w-full items-center rounded-2xl border p-6 ${theme.surface}`}>
+                <Text className={`text-center text-base font-black ${theme.headerText}`}>
+                  No categories available
+                </Text>
+                <Text className={`mt-2 text-center text-sm ${theme.subText}`}>
+                  Please seed or create event categories in the backend first.
+                </Text>
+              </View>
+            )}
+
             {categories.map((category, index) => (
               <MotiView
                 key={category.id}
@@ -130,4 +192,29 @@ export default function CreateEventCategoryScreen() {
       </ScrollView>
     </LinearGradient>
   );
+}
+
+function mapCategory(category: EventCategory) {
+  const display = categoryDisplay[category.slug] || {
+    icon: meetingIcon,
+    colors: ['#94a3b8', '#475569'],
+  };
+
+  return {
+    id: category.slug,
+    name: category.name,
+    icon: display.icon,
+    colors: category.color ? [category.color, darken(category.color)] : display.colors,
+  };
+}
+
+function darken(hex: string) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return '#475569';
+
+  const value = Number.parseInt(hex.slice(1), 16);
+  const r = Math.max(0, ((value >> 16) & 255) - 50);
+  const g = Math.max(0, ((value >> 8) & 255) - 50);
+  const b = Math.max(0, (value & 255) - 50);
+
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }

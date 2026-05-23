@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -20,15 +21,20 @@ import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/hooks/useAuth';
+
 const invyteLogo = require('@/assets/images/invyte-logo.png');
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { resetPassword } = useAuth();
 
   const { email = '' } = useLocalSearchParams<{
     email?: string;
+    code?: string;
   }>();
+  const { code = '' } = useLocalSearchParams<{ code?: string }>();
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -38,6 +44,8 @@ export default function ResetPasswordScreen() {
     useState(false);
 
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const particles = useMemo(
     () =>
@@ -72,14 +80,23 @@ export default function ResetPasswordScreen() {
   const hasUppercase = /[A-Z]/.test(newPassword);
   const hasNumber = /[0-9]/.test(newPassword);
 
-  const handleResetPassword = () => {
+  const handleResetPassword = async () => {
     if (!passwordsMatch || !isPasswordStrong) return;
 
-    setShowSuccess(true);
+    try {
+      setLoading(true);
+      setError('');
+      await resetPassword(String(email), String(code), newPassword);
+      setShowSuccess(true);
 
-    setTimeout(() => {
-      router.replace('/auth-login');
-    }, 2000);
+      setTimeout(() => {
+        router.replace('/auth-login');
+      }, 2000);
+    } catch (error: any) {
+      setError(error.message || 'Unable to reset password.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -315,17 +332,23 @@ export default function ResetPasswordScreen() {
               </View>
             </View>
 
+            {!!error && (
+              <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+                <Text className="text-sm font-semibold text-red-200">{error}</Text>
+              </View>
+            )}
+
             <View className="flex-1" />
 
             {/* Button */}
             <MotiPressable
-              disabled={!passwordsMatch || !isPasswordStrong}
+              disabled={loading || !passwordsMatch || !isPasswordStrong}
               onPress={handleResetPassword}
               animate={({ pressed }) => {
                 'worklet';
 
                 const enabled =
-                  passwordsMatch && isPasswordStrong;
+                  !loading && passwordsMatch && isPasswordStrong;
 
                 return {
                   scale: pressed && enabled ? 0.97 : 1,
@@ -338,9 +361,13 @@ export default function ResetPasswordScreen() {
                 colors={['#FFD700', '#FFA500']}
                 className="h-14 items-center justify-center"
               >
-                <Text className="text-lg font-black text-[#000045]">
-                  Reset Password
-                </Text>
+                {loading ? (
+                  <ActivityIndicator color="#000045" />
+                ) : (
+                  <Text className="text-lg font-black text-[#000045]">
+                    Reset Password
+                  </Text>
+                )}
               </LinearGradient>
             </MotiPressable>
           </MotiView>

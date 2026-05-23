@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -29,6 +30,9 @@ import {
 import { router } from 'expo-router';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import DatePickerField from '@/components/date-picker-field';
+import TimePickerField from '@/components/time-picker-field';
+import { formatCheckedInAt, formatDateForDisplay, formatDateTimeForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 export function DetailsTab({
   eventDetails,
   setEventDetails,
@@ -36,6 +40,7 @@ export function DetailsTab({
   setIsEditing,
   onSave,
   onDelete,
+  fieldErrors = {},
 }: any) {
   const theme = useScreenTheme();
 
@@ -88,30 +93,37 @@ export function DetailsTab({
           <View className="flex-row gap-3">
             <View className="flex-1">
               <Field label="Date">
-                <Input
-                  value={eventDetails.date}
-                  editable={isEditing}
-                  onChangeText={(value) =>
-                    setEventDetails({ ...eventDetails, date: value })
-                  }
-                />
+                {isEditing ? (
+                  <DatePickerField
+                    value={eventDetails.date}
+                    onChange={(value) => setEventDetails({ ...eventDetails, date: value })}
+                    minimumDate={new Date()}
+                    error={fieldErrors.start_date}
+                  />
+                ) : (
+                  <ReadOnlyValue value={eventDetails.date} type="date" />
+                )}
               </Field>
             </View>
 
             <View className="flex-1">
               <Field label="Time">
-                <Input
-                  value={eventDetails.time}
-                  editable={isEditing}
-                  onChangeText={(value) =>
-                    setEventDetails({ ...eventDetails, time: value })
-                  }
-                />
+                {isEditing ? (
+                  <TimePickerField
+                    value={eventDetails.time}
+                    onChange={(value) => setEventDetails({ ...eventDetails, time: value })}
+                    selectedDate={eventDetails.date}
+                    preventPastTime
+                    error={fieldErrors.start_time}
+                  />
+                ) : (
+                  <ReadOnlyValue value={eventDetails.time} type="time" />
+                )}
               </Field>
             </View>
           </View>
 
-          <Field label="Venue">
+          <Field label="Venue Address">
             <Input
               value={eventDetails.venue}
               editable={isEditing}
@@ -151,7 +163,7 @@ export function DetailsTab({
         className={`flex-row items-center justify-center gap-2 rounded-[20px] border-2 px-5 py-4 ${theme.isDarkMode ? 'border-red-400/30 bg-red-500/10' : 'border-red-200 bg-red-50'}`}
       >
         <Trash2 color="#dc2626" size={20} />
-        <Text className={`text-sm font-black ${theme.isDarkMode ? 'text-red-200' : 'text-red-700'}`}>Delete Event</Text>
+        <Text className={`text-sm font-black ${theme.isDarkMode ? 'text-red-200' : 'text-red-700'}`}>Move to Archive</Text>
       </Pressable>
     </View>
   );
@@ -159,18 +171,28 @@ export function DetailsTab({
 
 export function RSVPTab({
   event,
+  eventId,
   rsvpSettings,
   setRsvpSettings,
   rsvpQuestions,
   setRsvpQuestions,
+  eventStartDate,
+  fieldErrors = {},
   onDeleteQuestion,
+  onAddQuestion,
   onSave,
 }: any) {
   const theme = useScreenTheme();
+  const safeQuestions = Array.isArray(rsvpQuestions) ? rsvpQuestions : [];
 
   const addQuestion = () => {
+    if (onAddQuestion) {
+      onAddQuestion();
+      return;
+    }
+
     setRsvpQuestions([
-      ...rsvpQuestions,
+      ...safeQuestions,
       {
         id: Date.now(),
         question: 'New Question',
@@ -200,12 +222,31 @@ export function RSVPTab({
           </View>
 
           <Field label="RSVP Deadline">
-            <Input
-              value={rsvpSettings.deadline}
-              onChangeText={(value) =>
-                setRsvpSettings({ ...rsvpSettings, deadline: value })
-              }
-            />
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <DatePickerField
+                  value={rsvpSettings.deadlineDate}
+                  onChange={(value) => setRsvpSettings({ ...rsvpSettings, deadlineDate: value })}
+                  minimumDate={new Date()}
+                  maximumDate={eventStartDate ? new Date(`${eventStartDate}T00:00:00`) : undefined}
+                  error={fieldErrors.rsvp_deadline}
+                />
+              </View>
+              <View className="flex-1">
+                <TimePickerField
+                  value={rsvpSettings.deadlineTime}
+                  onChange={(value) => setRsvpSettings({ ...rsvpSettings, deadlineTime: value })}
+                  selectedDate={rsvpSettings.deadlineDate}
+                  preventPastTime
+                  error={fieldErrors.rsvp_deadline_time}
+                />
+              </View>
+            </View>
+            {!!rsvpSettings.deadlineDate && !!rsvpSettings.deadlineTime && (
+              <Text className={`mt-2 text-xs font-semibold ${theme.subText}`}>
+                RSVP deadline: {formatDateTimeForDisplay(rsvpSettings.deadlineDate, rsvpSettings.deadlineTime)}
+              </Text>
+            )}
           </Field>
 
           <Field label="Maximum Guests">
@@ -265,7 +306,7 @@ export function RSVPTab({
         </View>
 
         <View className="gap-3">
-          {rsvpQuestions.map((question: any) => (
+          {safeQuestions.map((question: any) => (
             <View
               key={question.id}
               className={`flex-row items-center gap-3 rounded-xl border p-4 ${theme.surfaceSoft}`}
@@ -294,7 +335,7 @@ export function RSVPTab({
         onPress={() =>
           router.push({
             pathname: '/event-rsvp-preview',
-            params: { event },
+            params: { eventId },
           })
         }
         className="overflow-hidden rounded-[20px]">
@@ -313,7 +354,9 @@ export function RSVPTab({
 }
 
 export function GuestsTab({
-  guests,
+  guests = [],
+  loading,
+  loaded,
   guestStats,
   searchQuery,
   setSearchQuery,
@@ -321,16 +364,19 @@ export function GuestsTab({
   setStatusFilter,
   onAddGuest,
   onDeleteGuest,
+  onOpenGuest,
 }: any) {
   const theme = useScreenTheme();
+  const safeGuests = Array.isArray(guests) ? guests : [];
+  const stats = guestStats ?? {};
 
   return (
     <View className="gap-4">
       <View className="flex-row gap-2.5">
-        <StatCard label="Going" value={guestStats.going} color="#059669" />
-        <StatCard label="Maybe" value={guestStats.maybe} color="#d97706" />
-        <StatCard label="Pending" value={guestStats.pending} color="#9333ea" />
-        <StatCard label="Total" value={guests.length} color="#4b5563" />
+        <StatCard label="Going" value={stats.going ?? 0} color="#059669" />
+        <StatCard label="Maybe" value={stats.maybe ?? 0} color="#d97706" />
+        <StatCard label="Pending" value={stats.pending ?? 0} color="#9333ea" />
+        <StatCard label="Total" value={safeGuests.length} color="#4b5563" />
       </View>
 
       <View className="flex-row gap-3">
@@ -387,18 +433,24 @@ export function GuestsTab({
       </ScrollView>
 
       <View className="gap-3">
-        {guests.length === 0 ? (
+        {loading && !loaded ? (
+          <View className="items-center py-12">
+            <ActivityIndicator color="#9333ea" />
+            <Text className={`mt-3 font-medium ${theme.subText}`}>Loading guests...</Text>
+          </View>
+        ) : safeGuests.length === 0 ? (
           <View className="items-center py-12">
             <Users color={theme.chevronColor} size={48} />
             <Text className={`mt-3 font-medium ${theme.subText}`}>
-              No guests found
+              No guests yet
             </Text>
           </View>
         ) : (
-          guests.map((guest: any) => (
+          safeGuests.map((guest: any) => (
             <GuestCard
               key={guest.id}
               guest={guest}
+              onPress={() => onOpenGuest?.(guest)}
               onDelete={() => onDeleteGuest(guest.id)}
             />
           ))
@@ -409,11 +461,14 @@ export function GuestsTab({
 }
 
 export function AttendanceTab({
-  guests,
+  guests = [],
+  loading,
+  loaded,
   attendedCount,
   onUpdateAttendance,
 }: any) {
   const theme = useScreenTheme();
+  const safeGuests = Array.isArray(guests) ? guests : [];
 
   return (
     <Card>
@@ -423,7 +478,7 @@ export function AttendanceTab({
             Check-In Status
           </Text>
           <Text className={`text-sm font-medium ${theme.subText}`}>
-            {attendedCount} of {guests.length} checked in
+            {attendedCount ?? 0} of {safeGuests.length} checked in
           </Text>
         </View>
 
@@ -434,7 +489,19 @@ export function AttendanceTab({
       </View>
 
       <View className="gap-3">
-        {guests.map((guest: any) => (
+        {loading && !loaded ? (
+          <View className="items-center py-12">
+            <ActivityIndicator color="#9333ea" />
+            <Text className={`mt-3 font-medium ${theme.subText}`}>Loading attendance...</Text>
+          </View>
+        ) : safeGuests.length === 0 ? (
+          <View className="items-center py-12">
+            <Users color={theme.chevronColor} size={48} />
+            <Text className={`mt-3 font-medium ${theme.subText}`}>
+              No guests to check in yet
+            </Text>
+          </View>
+        ) : safeGuests.map((guest: any) => (
           <View
             key={guest.id}
             className={`flex-row items-center justify-between rounded-xl border p-4 ${theme.surfaceSoft}`}
@@ -444,9 +511,9 @@ export function AttendanceTab({
                 {guest.name}
               </Text>
 
-              {guest.attended && guest.checkedInAt && (
+              {guest.attended && (guest.checkedInAt || guest.checked_in_at) && (
                 <Text className="text-xs font-semibold text-emerald-600">
-                  Checked in at {guest.checkedInAt}
+                  {formatCheckedInAt(guest.checkedInAt || guest.checked_in_at)}
                 </Text>
               )}
             </View>
@@ -484,8 +551,9 @@ export function AttendanceTab({
   );
 }
 
-export function UpdatesTab({ logs }: any) {
+export function UpdatesTab({ logs, loading }: any) {
   const theme = useScreenTheme();
+  const safeLogs = Array.isArray(logs) ? logs : [];
 
   return (
     <Card>
@@ -494,11 +562,23 @@ export function UpdatesTab({ logs }: any) {
       </Text>
 
       <View className="gap-3">
-        {logs.map((log: any) => {
+        {loading ? (
+          <View className="items-center py-12">
+            <ActivityIndicator color="#9333ea" />
+            <Text className={`mt-3 font-medium ${theme.subText}`}>Loading updates...</Text>
+          </View>
+        ) : safeLogs.length === 0 ? (
+          <View className="items-center py-12">
+            <Clock color={theme.chevronColor} size={48} />
+            <Text className={`mt-3 font-medium ${theme.subText}`}>
+              No updates yet
+            </Text>
+          </View>
+        ) : safeLogs.map((log: any) => {
           const config =
-            log.type === 'create'
+            log.type === 'guest_added' || log.type === 'event_created' || log.type === 'create'
               ? { icon: Plus, color: '#059669', bg: '#ecfdf5' }
-              : log.type === 'delete'
+              : log.type === 'guest_removed' || log.type === 'delete'
                 ? { icon: Trash2, color: '#dc2626', bg: '#fef2f2' }
                 : { icon: Edit3, color: '#2563eb', bg: '#eff6ff' };
 
@@ -520,6 +600,11 @@ export function UpdatesTab({ logs }: any) {
                 <Text className={`mb-1 text-sm font-bold ${theme.textOnSurface}`}>
                   {log.action}
                 </Text>
+                {!!log.description && (
+                  <Text className={`mb-1 text-xs font-medium ${theme.subText}`}>
+                    {log.description}
+                  </Text>
+                )}
                 <Text className={`text-xs font-medium ${theme.subText}`}>
                   {log.timestamp}
                 </Text>
@@ -549,7 +634,7 @@ export function DeleteModal({ visible, target, onCancel, onDelete }: any) {
 
           <Text className={`mb-6 text-center text-sm ${theme.subText}`}>
             {target?.type === 'event' &&
-              'Are you sure you want to delete this event? This action cannot be undone.'}
+              'This event will be moved to archive. You can restore it later.'}
             {target?.type === 'rsvp-question' &&
               'Are you sure you want to delete this RSVP question?'}
             {target?.type === 'guest' &&
@@ -572,7 +657,9 @@ export function DeleteModal({ visible, target, onCancel, onDelete }: any) {
                 colors={['#dc2626', '#e11d48']}
                 className="h-full items-center justify-center"
               >
-                <Text className="text-sm font-bold text-white">Delete</Text>
+                <Text className="text-sm font-bold text-white">
+                  {target?.type === 'event' ? 'Archive' : 'Delete'}
+                </Text>
               </LinearGradient>
             </Pressable>
           </View>
@@ -582,15 +669,15 @@ export function DeleteModal({ visible, target, onCancel, onDelete }: any) {
   );
 }
 
-function GuestCard({ guest, onDelete }: any) {
+function GuestCard({ guest, onDelete, onPress }: any) {
   const theme = useScreenTheme();
-  const config = getStatusConfig(guest.status);
+  const config = getStatusConfig(guest.status || guest.response_status);
   const StatusIcon = config.icon;
 
   return (
     <View className={`rounded-2xl border p-4 shadow-sm ${theme.surface}`}>
       <View className="flex-row items-center justify-between">
-        <View className="flex-1">
+        <Pressable onPress={onPress} className="flex-1">
           <Text className={`mb-1 text-base font-bold ${theme.textOnSurface}`}>
             {guest.name}
           </Text>
@@ -610,7 +697,7 @@ function GuestCard({ guest, onDelete }: any) {
               {config.label}
             </Text>
           </View>
-        </View>
+        </Pressable>
 
         <Pressable
           onPress={onDelete}
@@ -681,7 +768,21 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
   );
 }
 
+function ReadOnlyValue({ value, type }: { value: string; type: 'date' | 'time' }) {
+  const theme = useScreenTheme();
+  const displayValue = type === 'date' ? formatDateForDisplay(value) : formatTimeForDisplay(value);
+
+  return (
+    <View className={`h-12 justify-center rounded-xl border px-4 ${theme.divider} ${theme.surfaceMuted}`}>
+      <Text className={`text-sm font-medium ${theme.textOnSurface}`}>
+        {displayValue || value || 'Not set'}
+      </Text>
+    </View>
+  );
+}
+
 function getStatusConfig(status: string) {
+  const normalized = status === 'not_going' || status === 'cant_go' ? 'not-going' : status;
   const configs: Record<string, any> = {
     going: {
       label: 'Going',
@@ -713,5 +814,5 @@ function getStatusConfig(status: string) {
     },
   };
 
-  return configs[status] || configs.pending;
+  return configs[normalized] || configs.pending;
 }

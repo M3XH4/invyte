@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Image, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Bell, Calendar, ChevronRight, Clock, MapPin, Users } from 'lucide-react-native';
@@ -7,6 +7,11 @@ import { MotiView } from 'moti';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { useAuth } from '@/hooks/useAuth';
+import { useNotifications } from '@/hooks/useNotifications';
+import { eventStore, useEventStore } from '@/store/eventStore';
+import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
+import ScanQrFab from '@/components/scan-qr-fab';
 const heroCardImage = require('@/assets/images/hero-card-image.png');
 const birthdayTransIcon = require('@/assets/images/transparent-birthday-icon.png');
 const weddingTransIcon = require('@/assets/images/transparent-wedding-icon.png');
@@ -31,31 +36,47 @@ const fallbackCategories = [
   { id: 'meeting', name: 'Meeting', icon: meetingTransIcon, colors: ['#22d3ee', '#0891b2'] },
 ];
 
-const fallbackEvents: EventItem[] = [
-  {
-    id: 'fallback-1',
-    title: 'No upcoming events yet',
-    date: 'Create your first event',
-    dateISO: new Date().toISOString(),
-    time: '',
-    location: 'Start planning something fun!',
-    attendees: 0,
-  },
-];
-
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const { user } = useAuth();
+  const eventState = useEventStore();
+  const { unreadCount } = useNotifications();
 
   const categories = fallbackCategories;
 
-  const upcomingEvents: EventItem[] = [];
+  useEffect(() => {
+    eventStore.syncIfStale({ status: 'all', per_page: 50 }).catch(() => undefined);
+  }, []);
 
-  const notificationsCount = 0;
+  const upcomingEvents: EventItem[] = useMemo(() => {
+    const upcoming = eventState.events.filter((event) => {
+      if (event.status === 'upcoming') return true;
+      const date = event.start_date || event.date;
+      const time = event.start_time || event.time || '00:00';
+      return date ? new Date(`${date}T${String(time).slice(0, 5)}:00`).getTime() > Date.now() : false;
+    });
 
-  const safeUpcomingEvents =
-    upcomingEvents.length > 0 ? upcomingEvents : fallbackEvents;
+    return upcoming
+      .sort((a, b) => {
+        const aDate = new Date(`${a.start_date || a.date}T${String(a.start_time || a.time || '00:00').slice(0, 5)}:00`).getTime();
+        const bDate = new Date(`${b.start_date || b.date}T${String(b.start_time || b.time || '00:00').slice(0, 5)}:00`).getTime();
+        return aDate - bDate;
+      })
+      .slice(0, 5)
+      .map((event) => ({
+        id: event.uuid || event.id,
+        title: event.title,
+        date: event.date || event.start_date || 'Date TBD',
+        dateISO: event.date || event.start_date || new Date().toISOString(),
+        time: event.time || event.start_time || 'Time TBD',
+        location: event.location || event.venue_name || event.venue_address || 'Location TBD',
+        attendees: event.rsvp?.going ?? 0,
+      }));
+  }, [eventState.events]);
+
+  const notificationsCount = unreadCount;
 
   const latestUpcomingEvent = useMemo(() => {
     if (upcomingEvents.length === 0) return null;
@@ -65,6 +86,17 @@ export default function HomeScreen() {
         new Date(a.dateISO).getTime() - new Date(b.dateISO).getTime()
     )[0];
   }, [upcomingEvents]);
+
+  useEffect(() => {
+    if (typeof __DEV__ === 'undefined' || __DEV__) {
+      console.log('[home] event store render', {
+          events: eventState.events.length,
+        upcomingEvents: upcomingEvents.length,
+        hero: latestUpcomingEvent?.title || null,
+        refreshing: eventState.isRefreshing,
+      });
+    }
+  }, [eventState.events.length, eventState.isRefreshing, latestUpcomingEvent?.title, upcomingEvents.length]);
 
   const calculateDaysUntil = (eventDate: string) => {
     const today = new Date();
@@ -79,7 +111,7 @@ export default function HomeScreen() {
 
   const heroTitle = latestUpcomingEvent?.title ?? 'Create Your First Event';
   const heroDate = latestUpcomingEvent
-    ? `${latestUpcomingEvent.date} • ${latestUpcomingEvent.time}`
+    ? `${formatDateForDisplay(latestUpcomingEvent.date) || latestUpcomingEvent.date} • ${formatTimeForDisplay(latestUpcomingEvent.time) || latestUpcomingEvent.time}`
     : 'Start your adventure today';
   const heroLocation =
     latestUpcomingEvent?.location ?? 'Plan, invite, and celebrate';
@@ -99,6 +131,18 @@ export default function HomeScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={eventState.isRefreshing}
+            onRefresh={() => {
+              void eventStore.refreshEvents({ status: 'all', per_page: 50 }).catch((error) => {
+                if (typeof __DEV__ === 'undefined' || __DEV__) {
+                  console.log('[home] refresh failed; keeping existing hero/events', error?.message || error);
+                }
+              });
+            }}
+          />
+        }
         contentContainerStyle={{
           paddingTop: insets.top + 24,
           paddingBottom: insets.bottom + 130,
@@ -114,7 +158,7 @@ export default function HomeScreen() {
               >
                 <Image
                   source={{
-                    uri: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjGZJiVjkYNcKy7wX1h1Rz-5Hjgn6wn4S9Jw&s',
+                    uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
                   }}
                   className="h-14 w-14 rounded-full"
                 />
@@ -124,7 +168,7 @@ export default function HomeScreen() {
 
               <View>
                 <Text className={`text-2xl font-black ${theme.headerText}`}>
-                  Hey Argyle!
+                  Hey {user?.name?.split(' ')[0] || 'there'}!
                 </Text>
                 <Text className={`text-sm ${theme.subText}`}>
                   Ready to make today unforgettable?
@@ -158,7 +202,7 @@ export default function HomeScreen() {
             <Pressable
               onPress={() =>
                 latestUpcomingEvent
-                  ? router.push('/event-management')
+                  ? router.push({ pathname: '/event-management', params: { eventId: latestUpcomingEvent.id } })
                   : router.push('/create-event-categories')
               }
             >
@@ -229,7 +273,7 @@ export default function HomeScreen() {
                 <Pressable
                   onPress={() =>
                     latestUpcomingEvent
-                      ? router.push('/event-management')
+                      ? router.push({ pathname: '/event-management', params: { eventId: latestUpcomingEvent.id } })
                       : router.push('/create-event-categories')
                   }
                   className={`absolute bottom-3 left-5 z-20 h-[38px] flex-row items-center justify-center gap-1 rounded-full px-4 ${theme.surface}`}
@@ -316,10 +360,20 @@ export default function HomeScreen() {
             </View>
 
             <View className="gap-3">
-              {safeUpcomingEvents.map((event, index) => {
-                const isFallback = event.id === 'fallback-1';
-
-                return (
+              {upcomingEvents.length === 0 ? (
+                <Pressable
+                  onPress={() => router.push('/create-event-categories')}
+                  className={`rounded-2xl border p-4 shadow-sm ${theme.surface}`}
+                >
+                  <Text className={`text-base font-black ${theme.textOnSurface}`}>
+                    No upcoming events yet
+                  </Text>
+                  <Text className={`mt-1 text-sm ${theme.subText}`}>
+                    Create your first event to see it here.
+                  </Text>
+                </Pressable>
+              ) : (
+                upcomingEvents.map((event, index) => (
                   <MotiView
                     key={event.id}
                     from={{ opacity: 0, translateX: -20 }}
@@ -328,9 +382,7 @@ export default function HomeScreen() {
                   >
                     <Pressable
                       onPress={() =>
-                        isFallback
-                          ? router.push('/create-event-categories')
-                          : router.push('/event-management')
+                        router.push({ pathname: '/event-management', params: { eventId: event.id } })
                       }
                       className={`rounded-2xl border p-4 shadow-sm ${theme.surface}`}
                     >
@@ -358,9 +410,7 @@ export default function HomeScreen() {
                           <View className="mb-1 flex-row items-center gap-2">
                             <Clock color={theme.chevronColor} size={14} />
                             <Text className={`text-xs ${theme.textOnSurfaceSecondary}`}>
-                              {isFallback
-                                ? event.date
-                                : `${event.date} • ${event.time}`}
+                              {`${formatDateForDisplay(event.date) || event.date} • ${formatTimeForDisplay(event.time) || event.time}`}
                             </Text>
                           </View>
 
@@ -375,11 +425,11 @@ export default function HomeScreen() {
                           </View>
                         </View>
 
-                        {!isFallback && (
                           <View className="items-end gap-2">
                             <LinearGradient
                               colors={['#a855f7', '#ec4899']}
-                              className="rounded-xl px-3 py-1.5"
+                              className="px-3 py-1.5"
+                              style={{ borderRadius: 9999 }}
                             >
                               <View className="flex-row items-center gap-1.5">
                                 <Calendar color="white" size={14} />
@@ -396,16 +446,17 @@ export default function HomeScreen() {
                               </Text>
                             </View>
                           </View>
-                        )}
                       </View>
                     </Pressable>
                   </MotiView>
-                );
-              })}
+                ))
+              )}
             </View>
           </View>
         </View>
       </ScrollView>
+
+      <ScanQrFab />
     </LinearGradient>
   );
 }

@@ -5,7 +5,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { MotiImage, MotiText, MotiView } from "moti";
 import { ArrowRight } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { profileApi } from "@/api/profileApi";
+import { authStore } from "@/store/authStore";
 
 const calendarImage = require("@/assets/images/calendar.png");
 const threeKidsImage = require("@/assets/images/3-kids.png");
@@ -231,8 +232,16 @@ export default function OnboardingScreen() {
   const shapes = shapesByScreen[currentStep];
 
   const finishOnboarding = async () => {
-    await AsyncStorage.setItem('hasSeenOnboarding', 'true');
-    router.replace('/auth-login');
+    try {
+      const user = await profileApi.update({
+        has_seen_getting_started: true,
+        has_seen_onboarding: true,
+      });
+      await authStore.setUser(user);
+      router.replace('/tabs');
+    } catch {
+      router.replace('/tabs');
+    }
   };
   const handleNext = async () => {
     if (currentStep < onboardingSteps.length - 1) {

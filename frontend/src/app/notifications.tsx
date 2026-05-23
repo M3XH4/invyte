@@ -1,4 +1,4 @@
-import { ScrollView, Text, View, Pressable } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -7,7 +7,6 @@ import {
   CheckCheck,
   CheckCircle,
   Clock,
-  HelpCircle,
   Trophy,
   Trash2,
   Users,
@@ -16,44 +15,25 @@ import { MotiView } from 'moti';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
-
-type NotificationItem = {
-  id: number;
-  title: string;
-  message: string;
-  time: string;
-  unread: boolean;
-  color: string;
-  icon: typeof Bell;
-};
-
-const notifications: NotificationItem[] = [
-  {
-    id: 1,
-    icon: CheckCircle,
-    title: 'Alex accepted your invitation!',
-    message: "Alex is going to Sarah's Birthday Bash",
-    time: '5 minutes ago',
-    unread: true,
-    color: '#22c55e',
-  }
-];
-
-const fallbackNotifications: NotificationItem[] = [];
+import { useNotifications } from '@/hooks/useNotifications';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { sendTestLocalNotification } from '@/services/pushNotifications';
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const { notifications, loading, refreshing, error, unreadCount, refresh, markAllAsRead } = useNotifications();
+  const push = usePushNotifications();
 
-  const safeNotifications = notifications.length > 0 ? notifications : fallbackNotifications;
-  const unreadCount = notifications.filter((item) => item.unread).length;
+  const safeNotifications = Array.isArray(notifications) ? notifications : [];
   const hasNotifications = safeNotifications.length > 0;
 
   return (
     <LinearGradient colors={theme.pageGradient} className="flex-1">
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         contentContainerStyle={{
           paddingTop: insets.top + 16,
           paddingBottom: insets.bottom + 32,
@@ -76,7 +56,7 @@ export default function NotificationsScreen() {
             </View>
 
             {hasNotifications && (
-              <Pressable className="flex-row items-center gap-1">
+              <Pressable onPress={markAllAsRead} className="flex-row items-center gap-1">
                 <CheckCheck color="#9333ea" size={16} />
                 <Text className="text-xs font-semibold text-purple-600">
                   Mark all
@@ -108,8 +88,44 @@ export default function NotificationsScreen() {
             </View>
           )}
 
+          <View className={`mb-5 rounded-2xl border p-4 shadow-sm ${theme.surface}`}>
+            <View className="mb-4 flex-row items-center justify-between gap-4">
+              <View className="flex-1">
+                <Text className={`text-base font-black ${theme.headerText}`}>Device Push</Text>
+                <Text className={`mt-1 text-sm ${theme.subText}`}>
+                  {push.statusMessage || (push.enabled ? 'This device is set to receive alerts.' : 'Push notifications are off on this device.')}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => push.toggle(!push.enabled)}
+                className={`rounded-xl px-4 py-2 ${push.enabled ? 'bg-emerald-500' : 'bg-purple-600'}`}
+              >
+                <Text className="text-sm font-black text-white">{push.enabled ? 'On' : 'Enable'}</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={sendTestLocalNotification}
+              className={`h-11 items-center justify-center rounded-xl border ${theme.surfaceMuted}`}
+            >
+              <Text className={`text-sm font-black ${theme.textOnSurface}`}>Send Test Notification</Text>
+            </Pressable>
+          </View>
+
+          {loading && (
+            <View className={`mb-5 rounded-2xl border p-5 ${theme.surface}`}>
+              <ActivityIndicator color="#9333ea" />
+              <Text className={`mt-2 text-center text-sm font-semibold ${theme.subText}`}>Loading notifications...</Text>
+            </View>
+          )}
+
+          {!!error && (
+            <View className={`mb-5 rounded-2xl border p-4 ${theme.surface}`}>
+              <Text className="text-sm font-semibold text-red-500">{error}</Text>
+            </View>
+          )}
+
           {/* Empty State */}
-          {!hasNotifications && (
+          {!loading && !hasNotifications && (
             <View className={`mt-20 items-center rounded-3xl border p-8 shadow-sm ${theme.surface}`}>
               <View className={`mb-4 h-20 w-20 items-center justify-center rounded-full ${theme.surfaceMuted}`}>
                 <Bell color="#9333ea" size={36} />
@@ -128,7 +144,9 @@ export default function NotificationsScreen() {
           {/* Notifications List */}
           <View className="gap-3">
             {safeNotifications.map((notification: any, index: number) => {
-              const IconComponent = notification.icon;
+              const config = getNotificationConfig(notification.type);
+              const IconComponent = config.icon;
+              const unread = notification.unread || !notification.is_read;
 
               return (
                 <MotiView
@@ -139,20 +157,20 @@ export default function NotificationsScreen() {
                     type: 'timing',
                     delay: index * 50,
                   }}
-                  className={`relative overflow-hidden rounded-xl border p-3 ${notification.unread
+                  className={`relative overflow-hidden rounded-xl border p-3 ${unread
                     ? (theme.isDarkMode ? 'border-fuchsia-400/20 bg-fuchsia-400/10' : 'border-purple-200 bg-purple-50')
                     : theme.surface
                     }`}
                 >
                   <View
                     className="absolute bottom-0 left-0 top-0 w-1"
-                    style={{ backgroundColor: notification.color }}
+                    style={{ backgroundColor: config.color }}
                   />
 
                   <View className="flex-row items-start gap-3 pl-2">
                     <View
                       className="h-10 w-10 items-center justify-center rounded-xl shadow-lg"
-                      style={{ backgroundColor: notification.color }}
+                      style={{ backgroundColor: notification.color || config.color }}
                     >
                       <IconComponent color="white" size={20} strokeWidth={2} />
                     </View>
@@ -163,7 +181,7 @@ export default function NotificationsScreen() {
                           {notification.title}
                         </Text>
 
-                        {notification.unread && (
+                        {unread && (
                           <View className="mt-1 h-2 w-2 rounded-full bg-purple-500" />
                         )}
                       </View>
@@ -173,7 +191,7 @@ export default function NotificationsScreen() {
                       </Text>
 
                       <Text className={`text-[10px] ${theme.mutedText}`}>
-                        {notification.time}
+                        {notification.created_at ? new Date(notification.created_at).toLocaleString() : ''}
                       </Text>
                     </View>
 
@@ -189,4 +207,16 @@ export default function NotificationsScreen() {
       </ScrollView>
     </LinearGradient>
   );
+}
+
+function getNotificationConfig(type?: string) {
+  const configs: Record<string, { icon: any; color: string }> = {
+    rsvp_submitted: { icon: CheckCircle, color: '#22c55e' },
+    event_reminder: { icon: Clock, color: '#f59e0b' },
+    event_updated: { icon: Bell, color: '#9333ea' },
+    guest_invited: { icon: Users, color: '#2563eb' },
+    achievement: { icon: Trophy, color: '#f97316' },
+  };
+
+  return configs[type || ''] || { icon: Bell, color: '#9333ea' };
 }

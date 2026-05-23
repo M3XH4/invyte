@@ -46,6 +46,7 @@ export default function AddGuestModal({
 }: any) {
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const safeEvents = Array.isArray(events) ? events : [];
 
   const statusConfig = {
     going: { label: 'Going', icon: CheckCircle, bg: '#ecfdf5', text: '#059669' },
@@ -61,7 +62,7 @@ export default function AddGuestModal({
     { id: 'telegram', label: 'Telegram', icon: Send, color: '#0891b2' },
   ];
 
-  const disabled = !newGuestName.trim() || !contactValue.trim();
+  const disabled = !selectedEventId || !newGuestName.trim() || !contactValue.trim();
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
@@ -95,7 +96,7 @@ export default function AddGuestModal({
             <Text className={`mb-2 text-sm font-bold ${theme.subText}`}>Select Event</Text>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-              {events.map((event: any) => {
+              {safeEvents.map((event: any) => {
                 const selected = selectedEventId === event.id;
 
                 return (
@@ -110,7 +111,11 @@ export default function AddGuestModal({
                       colors={event.categoryColor}
                       className="mb-2 h-10 w-10 items-center justify-center rounded-xl"
                     >
-                      <Image source={event.categoryIcon} className="h-6 w-6" resizeMode="contain" />
+                      {event.categoryIcon ? (
+                        <Image source={event.categoryIcon} className="h-6 w-6" resizeMode="contain" />
+                      ) : (
+                        <UserPlus color="white" size={18} />
+                      )}
                     </LinearGradient>
 
                     <Text numberOfLines={1} className={`text-sm font-bold ${selected ? 'text-fuchsia-300' : theme.textOnSurface}`}>

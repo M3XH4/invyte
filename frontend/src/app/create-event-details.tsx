@@ -10,17 +10,18 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { ArrowLeft, Camera, Users, MapPin } from "lucide-react-native";
+import { ArrowLeft, Camera, MapPin } from "lucide-react-native";
 import { MotiPressable } from "moti/interactions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import DatePickerField from "@/components/date-picker-field";
 import TimePickerField from "@/components/time-picker-field";
 import SpinnerField from "@/components/spinner-field";
 import * as Location from "expo-location";
-
-import { Platform } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { createEventStore } from '@/store/createEventStore';
+import { validateCreateEventStep, type ValidationErrors } from '@/utils/createEventValidation';
 
 const eventCoverImage = require("@/assets/images/hero-card-image.png");
 
@@ -33,10 +34,13 @@ export default function CreateEvent() {
   }>();
 
   const [eventData, setEventData] = useState({
-    coverImage: eventCoverImage,
+    coverImage: undefined as string | undefined,
+    coverImageAsset: undefined as ImagePicker.ImagePickerAsset | undefined,
     date: "",
     time: "",
     location: "",
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
     description: "",
     guestCount: "",
     rsvpDeadline: "",
@@ -76,9 +80,28 @@ export default function CreateEvent() {
     startTime: "",
     endTime: "",
   });
+  const [errors, setErrors] = useState<ValidationErrors>({});
 
   const updateField = (field: string, value: any) => {
     setEventData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const pickCoverImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      updateField('coverImage', result.assets[0].uri);
+      updateField('coverImageAsset', result.assets[0]);
+    }
   };
 
   const getCategoryTitle = () => {
@@ -114,7 +137,61 @@ export default function CreateEvent() {
         "location",
         `${place.name || ""} ${place.street || ""}, ${place.city || ""}`,
       );
+      updateField("latitude", location.coords.latitude);
+      updateField("longitude", location.coords.longitude);
     }
+  };
+
+  const buildEventTitle = () =>
+    eventData.eventName ||
+    eventData.meetingTitle ||
+    (eventData.celebrantName ? `${eventData.celebrantName}'s Birthday` : '') ||
+    (eventData.brideName || eventData.groomName
+      ? `${eventData.brideName} & ${eventData.groomName}`
+      : '') ||
+    getCategoryTitle();
+
+  const handleContinue = () => {
+    const nextDraft = {
+      categorySlug: String(category),
+      title: buildEventTitle(),
+      description:
+        eventData.description ||
+        eventData.specialMessage ||
+        eventData.agenda ||
+        eventData.memorialMessage,
+      startDate: eventData.date,
+      startTime: eventData.time || eventData.startTime,
+      endTime: eventData.endTime || undefined,
+      venueAddress:
+        eventData.location ||
+        eventData.venueOrLink ||
+        eventData.ceremonyVenue ||
+        eventData.receptionVenue ||
+        eventData.wakeVenue,
+      latitude: eventData.latitude,
+      longitude: eventData.longitude,
+      dressCode: eventData.dressCode,
+      foodOption: eventData.foodOption,
+      coverImage: eventData.coverImageAsset?.uri,
+      localCoverName: eventData.coverImageAsset?.fileName || undefined,
+      localCoverType: eventData.coverImageAsset?.mimeType || undefined,
+    };
+
+    const nextErrors = validateCreateEventStep('details', {
+      ...createEventStore.get(),
+      ...nextDraft,
+    });
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    setErrors({});
+    createEventStore.merge(nextDraft);
+
+    router.push(`/create-event-rsvp-settings?category=${category}`);
   };
   const renderFormFields = () => {
     switch (category) {
@@ -159,30 +236,7 @@ export default function CreateEvent() {
               updateField={updateField}
             />
 
-            <FormSection title="Guest Information">
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <FormField label="Expected Guests">
-                    <Input
-                      value={eventData.guestCount}
-                      onChangeText={(v) => updateField("guestCount", v)}
-                      placeholder="50"
-                      keyboardType="numeric"
-                    />
-                  </FormField>
-                </View>
-
-                <View className="flex-1">
-                  <FormField label="RSVP Deadline">
-                    <DatePickerField
-                      value={eventData.rsvpDeadline}
-                      onChange={(v) => updateField("rsvpDeadline", v)}
-                      placeholder="RSVP Deadline"
-                    />
-                  </FormField>
-                </View>
-              </View>
-
+            <FormSection title="Guest Message">
               <FormField label="Special Message">
                 <Input
                   value={eventData.specialMessage}
@@ -246,12 +300,6 @@ export default function CreateEvent() {
             />
 
             <FormSection title="Wedding Options">
-              <ToggleRow
-                label="Allow Plus One"
-                value={eventData.plusOneAllowed}
-                onValueChange={(v) => updateField("plusOneAllowed", v)}
-              />
-
               <FormField label="Gift Registry Link">
                 <Input
                   value={eventData.giftRegistryLink}
@@ -303,15 +351,6 @@ export default function CreateEvent() {
               </FormField>
 
               <DateTimeFields eventData={eventData} updateField={updateField} />
-
-              <FormField label="Attendees Limit">
-                <Input
-                  value={eventData.attendeesLimit}
-                  onChangeText={(v) => updateField("attendeesLimit", v)}
-                  placeholder="20"
-                  keyboardType="numeric"
-                />
-              </FormField>
 
               <ToggleRow
                 label="Send Reminder"
@@ -470,21 +509,23 @@ export default function CreateEvent() {
           {/* Cover Image */}
           <View className={`mb-6 h-[200px] overflow-hidden rounded-3xl shadow-lg ${theme.isDarkMode ? 'border border-white/10' : ''}`}>
             <Image
-              source={eventCoverImage}
+              source={eventData.coverImage ? { uri: eventData.coverImage } : eventCoverImage}
               className="h-full w-full"
               resizeMode="cover"
             />
 
-            <Pressable className={`absolute bottom-4 self-center rounded-full px-6 py-2.5 ${theme.surfaceStrong}`}>
+            <Pressable onPress={pickCoverImage} className={`absolute bottom-4 self-center rounded-full px-6 py-2.5 ${theme.surfaceStrong}`}>
               <Text className={`text-sm font-bold ${theme.textOnSurface}`}>
                 Change Cover
               </Text>
             </Pressable>
 
-            <Pressable className={`absolute right-4 top-4 h-10 w-10 items-center justify-center rounded-full ${theme.surfaceStrong}`}>
+            <Pressable onPress={pickCoverImage} className={`absolute right-4 top-4 h-10 w-10 items-center justify-center rounded-full ${theme.surfaceStrong}`}>
               <Camera color={theme.iconColor} size={20} />
             </Pressable>
           </View>
+
+          {Object.keys(errors).length > 0 && <ErrorCard errors={errors} />}
 
           <View className="gap-5">{renderFormFields()}</View>
         </View>
@@ -496,7 +537,7 @@ export default function CreateEvent() {
         style={{ bottom: 0, paddingBottom: insets.bottom + 16 }}
       >
         <MotiPressable
-          onPress={() => router.push(`/create-event-rsvp-settings?category=${category}`)}
+          onPress={handleContinue}
           animate={({ pressed }) => {
             "worklet";
             return { scale: pressed ? 0.98 : 1 };
@@ -526,7 +567,7 @@ function CommonEventDetails({
 }) {
   return (
     <FormSection title="Event Details">
-      <FormField label="Venue">
+      <FormField label="Venue Address">
         <Input
           value={eventData.location}
           onChangeText={(v) => updateField("location", v)}
@@ -536,13 +577,13 @@ function CommonEventDetails({
 
       <DateTimeFields eventData={eventData} updateField={updateField} />
 
-      <View className="flex-row gap-3">
+      <View className="flex-col gap-3">
         <View className="flex-1">
           <FormField label="Food/Catering">
             <SpinnerField
               value={eventData.foodOption}
-              onChange={(v) => updateField("foodOption", v)}
-              items={["Buffet", "Plated Dinner", "Snacks Only", "No Food"]}
+              onChange={(value) => updateField('foodOption', value)}
+              items={['Buffet', 'Plated Meal', 'Snacks Only', 'No Food']}
             />
           </FormField>
         </View>
@@ -551,14 +592,8 @@ function CommonEventDetails({
           <FormField label="Dress Code">
             <SpinnerField
               value={eventData.dressCode}
-              onChange={(v) => updateField("dressCode", v)}
-              items={[
-                "Casual",
-                "Formal",
-                "Semi-Formal",
-                "Cocktail",
-                "Black Tie",
-              ]}
+              onChange={(value) => updateField('dressCode', value)}
+              items={['Casual', 'Formal', 'Semi-formal', 'Costume']}
             />
           </FormField>
         </View>
@@ -580,6 +615,7 @@ function DateTimeFields({
         <DatePickerField
           value={eventData.date}
           onChange={(value) => updateField("date", value)}
+          minimumDate={new Date()}
         />
       </View>
 
@@ -587,6 +623,8 @@ function DateTimeFields({
         <TimePickerField
           value={eventData.time}
           onChange={(value) => updateField("time", value)}
+          selectedDate={eventData.date}
+          preventPastTime
         />
       </View>
     </View>
@@ -642,6 +680,18 @@ function Input({
         }`}
       textAlignVertical={multiline ? "top" : "center"}
     />
+  );
+}
+
+function ErrorCard({ errors }: { errors: ValidationErrors }) {
+  return (
+    <View className="mb-5 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+      {Object.entries(errors).map(([field, message]) => (
+        <Text key={field} className="text-sm font-semibold text-red-200">
+          {message}
+        </Text>
+      ))}
+    </View>
   );
 }
 

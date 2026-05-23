@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ArrowLeft,
   Bell,
+  Award,
   ChevronRight,
   Globe,
   HelpCircle,
@@ -19,14 +20,25 @@ import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@/context/theme-context';
+import { useAuth } from '@/hooks/useAuth';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { getPreference } from '@/utils/preferences';
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { scheme, setScheme } = useAppTheme();
+  const { user, logout } = useAuth();
+  const push = usePushNotifications();
 
-  const [notifications, setNotifications] = useState(true);
+  const [language, setLanguage] = useState('English (US)');
   const darkMode = scheme === 'dark';
+
+  useEffect(() => {
+    getPreference('invyte_language').then((stored) => {
+      if (stored) setLanguage(stored);
+    });
+  }, []);
 
   const settingsSections = [
     {
@@ -39,6 +51,14 @@ export default function ProfileSettingsScreen() {
           description: 'Update your personal info',
           colors: ['#c084fc', '#9333ea'],
           route: '/edit-profile',
+        },
+        {
+          id: 'achievements',
+          icon: Award,
+          label: 'Achievements',
+          description: 'View badges and progress',
+          colors: ['#facc15', '#f97316'],
+          route: '/achievements',
         },
         {
           id: 'privacy',
@@ -60,8 +80,8 @@ export default function ProfileSettingsScreen() {
           description: 'Event reminders and updates',
           colors: ['#f472b6', '#db2777'],
           toggle: true,
-          value: notifications,
-          onChange: setNotifications,
+          value: push.enabled,
+          onChange: push.toggle,
         },
         {
           id: 'theme',
@@ -77,7 +97,7 @@ export default function ProfileSettingsScreen() {
           id: 'language',
           icon: Globe,
           label: 'Language',
-          description: 'English (US)',
+          description: language,
           colors: ['#4ade80', '#16a34a'],
           route: '/language',
         },
@@ -159,21 +179,24 @@ export default function ProfileSettingsScreen() {
               <View className="z-10 flex-row items-center gap-4">
                 <Image
                   source={{
-                    uri: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjGZJiVjkYNcKy7wX1h1Rz-5Hjgn6wn4S9Jw&s',
+                    uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
                   }}
-                  className="h-16 w-16 rounded-[20px]"
+                  className="h-14 w-14 rounded-full"
                 />
 
                 <View className="flex-1">
                   <Text className="mb-0.5 text-xl font-black text-white">
-                    Argyle
+                    {user?.name || 'Guest User'}
                   </Text>
                   <Text className="text-sm font-medium text-white/70">
-                    @argyle_events
+                    {user?.username ? `@${user.username.replace('@', '')}` : user?.email || 'Sign in to sync settings'}
                   </Text>
                 </View>
 
-                <Pressable className="rounded-xl border border-white/30 bg-white/20 px-4 py-2">
+                <Pressable
+                  onPress={() => router.push('/edit-profile' as any)}
+                  className="rounded-xl border border-white/30 bg-white/20 px-4 py-2"
+                >
                   <Text className="text-sm font-bold text-white">Edit</Text>
                 </Pressable>
               </View>
@@ -273,7 +296,7 @@ export default function ProfileSettingsScreen() {
 
           {/* Logout */}
           <MotiPressable
-            onPress={() => router.replace('/auth-login')}
+            onPress={logout}
             from={{ opacity: 0, translateY: 10 }}
             animate={({ pressed }) => {
               'worklet';

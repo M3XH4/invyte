@@ -1,5 +1,5 @@
-import { Pressable, ScrollView, Share, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import QRCode from 'react-native-qrcode-svg';
 import {
@@ -12,19 +12,43 @@ import {
 import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { eventsApi } from '@/api/eventsApi';
+import { useEvent } from '@/hooks/useEvents';
+import { useEffect, useState } from 'react';
+import type { QRCodePayload } from '@/types/event';
+import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 export default function QRInvitationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { event } = useLocalSearchParams<{ event?: string }>();
+  const { eventId } = useLocalSearchParams<{ eventId?: string }>();
+  const { event, loading: eventLoading } = useEvent(eventId);
+  const [qr, setQr] = useState<QRCodePayload | null>(null);
+  const [loadingQr, setLoadingQr] = useState(!!eventId);
+  const [error, setError] = useState('');
 
-  const selectedEvent = event ? JSON.parse(event) : null;
-  const qrValue = `https://invyte.app/event/${selectedEvent?.id ?? 'preview'}`;
+  useEffect(() => {
+    if (!eventId) return;
 
-  const title = selectedEvent?.title ?? "Event Name";
-  const date = selectedEvent?.date ?? 'Event Date';
-  const time = selectedEvent?.time ?? 'Event TIme';
-  const location = selectedEvent?.location ?? 'Event Location';
+    const loadQr = async () => {
+      try {
+        setLoadingQr(true);
+        setError('');
+        setQr(await eventsApi.qr(eventId));
+      } catch (error: any) {
+        setError(error.message || 'Unable to load QR invitation.');
+      } finally {
+        setLoadingQr(false);
+      }
+    };
+
+    loadQr();
+  }, [eventId]);
+
+  const qrValue = qr?.public_url || qr?.qr_value || qr?.url || qr?.payload?.url || event?.public_url || event?.qr_value || '';
+  const title = event?.title ?? "Event Name";
+  const date = formatDateForDisplay(event?.date || event?.start_date || '') || 'Event Date';
+  const time = formatTimeForDisplay(event?.time || event?.start_time || '') || 'Event Time';
+  const location = event?.location || event?.venue_address || 'Event Location';
   const handleShare = async () => {
     await Share.share({
       message: qrValue,
@@ -99,13 +123,19 @@ export default function QRInvitationScreen() {
 
                 {/* QR Code */}
                 <View className="mb-5 items-center rounded-2xl bg-white p-5 shadow-xl">
-                  <QRCode
-                    value={qrValue}
-                    size={180}
-                    ecl="H"
-                    color="#1a1a2e"
-                    backgroundColor="white"
-                  />
+                  {eventLoading || loadingQr ? (
+                    <View className="h-[180px] w-[180px] items-center justify-center">
+                      <ActivityIndicator color="#1a1a2e" />
+                    </View>
+                  ) : (
+                    <QRCode
+                      value={qrValue || 'missing-qr-url'}
+                      size={180}
+                      ecl="H"
+                      color="#1a1a2e"
+                      backgroundColor="white"
+                    />
+                  )}
                 </View>
 
                 {/* Footer */}
@@ -134,8 +164,7 @@ export default function QRInvitationScreen() {
             {/* Description */}
             <View className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-4">
               <Text className="text-center text-sm leading-5 text-white/80">
-                Share this QR code with your guests so they can easily RSVP and
-                get all event details instantly
+                {error || `Share this QR code with your guests so they can easily RSVP at ${qrValue || 'the public invite link'}.`}
               </Text>
             </View>
 

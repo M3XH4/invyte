@@ -27,27 +27,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DatePickerField from '@/components/date-picker-field';
 import TimePickerField from '@/components/time-picker-field';
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { createEventStore, type RSVPResponseOption } from '@/store/createEventStore';
+import { validateCreateEventStep, type ValidationErrors } from '@/utils/createEventValidation';
+import { formatDateTimeForDisplay } from '@/utils/dateTime';
 
 export default function RSVPSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
   const { category = 'birthday' } = useLocalSearchParams<{ category?: string }>();
+  const draft = createEventStore.get();
+  const eventStartDate = draft.startDate ? new Date(`${draft.startDate}T00:00:00`) : undefined;
 
   const [settings, setSettings] = useState({
-    rsvpEnabled: true,
-    responseOptions: ['going', 'maybe', 'cant-go'],
-    rsvpDeadlineDate: '',
-    rsvpDeadlineTime: '',
-    maxGuests: '',
-    allowExtraGuests: false,
-    allowPlusOnes: true,
-    maxCompanions: '1',
-    requireApproval: false,
+    rsvpEnabled: draft.rsvpEnabled,
+    responseOptions: draft.responseOptions,
+    rsvpDeadlineDate: draft.rsvpDeadlineDate || '',
+    rsvpDeadlineTime: draft.rsvpDeadlineTime || '',
+    maxGuests: draft.maxGuests ? String(draft.maxGuests) : '',
+    allowExtraGuests: draft.allowExtraGuests,
+    allowPlusOnes: draft.allowPlusOnes,
+    maxCompanions: draft.maxCompanions ? String(draft.maxCompanions) : '1',
+    requireApproval: draft.requireApproval,
     checkInMethod: 'qr',
     reminders: ['3-days', 'event-day'],
-    customQuestions: [] as string[],
+    customQuestions: draft.customQuestions,
   });
+  const [newQuestion, setNewQuestion] = useState('');
+  const [errors, setErrors] = useState<ValidationErrors>({});
 
   const updateSetting = (key: string, value: any) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -61,7 +68,7 @@ export default function RSVPSettingsScreen() {
     updateSetting('reminders', reminders);
   };
 
-  const toggleResponseOption = (option: string) => {
+  const toggleResponseOption = (option: RSVPResponseOption) => {
     if (
       settings.responseOptions.length === 1 &&
       settings.responseOptions.includes(option)
@@ -74,6 +81,47 @@ export default function RSVPSettingsScreen() {
       : [...settings.responseOptions, option];
 
     updateSetting('responseOptions', responseOptions);
+  };
+
+  const handleContinue = () => {
+    const nextDraft = {
+      rsvpEnabled: settings.rsvpEnabled,
+      rsvpDeadlineDate: settings.rsvpDeadlineDate || undefined,
+      rsvpDeadlineTime: settings.rsvpDeadlineTime || undefined,
+      maxGuests: Number(settings.maxGuests) || undefined,
+      allowPlusOnes: settings.allowPlusOnes,
+      maxCompanions: settings.allowPlusOnes ? Number(settings.maxCompanions) || undefined : undefined,
+      allowExtraGuests: settings.allowExtraGuests,
+      requireApproval: settings.requireApproval,
+      responseOptions: settings.responseOptions,
+      customQuestions: settings.customQuestions,
+    };
+
+    const nextErrors = validateCreateEventStep('rsvp', {
+      ...createEventStore.get(),
+      ...nextDraft,
+    });
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    setErrors({});
+    createEventStore.merge(nextDraft);
+
+    router.push(`/create-event-theme-selection?category=${category}`);
+  };
+
+  const addCustomQuestion = () => {
+    const question = newQuestion.trim();
+    if (!question) return;
+
+    updateSetting('customQuestions', [
+      ...settings.customQuestions,
+      { question, placeholder: 'Guest answer', required: false, type: 'text' },
+    ]);
+    setNewQuestion('');
   };
 
   return (
@@ -118,6 +166,8 @@ export default function RSVPSettingsScreen() {
           </View>
 
           <View className="gap-5">
+            {Object.keys(errors).length > 0 && <ErrorCard errors={errors} />}
+
             <SettingsCard>
               <View className="flex-row items-center justify-between">
                 <View className="flex-1">
@@ -167,8 +217,8 @@ export default function RSVPSettingsScreen() {
                       icon={XCircle}
                       label="Can't Go"
                       color="#dc2626"
-                      selected={settings.responseOptions.includes('cant-go')}
-                      onPress={() => toggleResponseOption('cant-go')}
+                      selected={settings.responseOptions.includes('cant_go')}
+                      onPress={() => toggleResponseOption('cant_go')}
                     />
                   </View>
 
@@ -191,10 +241,15 @@ export default function RSVPSettingsScreen() {
                       </Text>
                       <DatePickerField
                         value={settings.rsvpDeadlineDate}
-                        onChange={(value) =>
+                        onChange={(value) => {
                           updateSetting('rsvpDeadlineDate', value)
-                        }
+                          if (eventStartDate && new Date(`${value}T00:00:00`) > eventStartDate) {
+                            updateSetting('rsvpDeadlineTime', '');
+                          }
+                        }}
                         placeholder="Select date"
+                        minimumDate={new Date()}
+                        maximumDate={eventStartDate}
                       />
                     </View>
 
@@ -208,9 +263,16 @@ export default function RSVPSettingsScreen() {
                           updateSetting('rsvpDeadlineTime', value)
                         }
                         placeholder="Select time"
+                        selectedDate={settings.rsvpDeadlineDate}
+                        preventPastTime
                       />
                     </View>
                   </View>
+                  {!!settings.rsvpDeadlineDate && !!settings.rsvpDeadlineTime && (
+                    <Text className={`mt-3 text-xs font-semibold ${theme.subText}`}>
+                      RSVP deadline: {formatDateTimeForDisplay(settings.rsvpDeadlineDate, settings.rsvpDeadlineTime)}
+                    </Text>
+                  )}
                 </SettingsCard>
 
                 <SettingsCard>
@@ -344,25 +406,35 @@ export default function RSVPSettingsScreen() {
                   </Text>
 
                   <View className="mb-3 gap-2">
-                    <QuestionSample
-                      label="Food preference"
-                      placeholder="Vegetarian, Vegan, No preference"
-                    />
-                    <QuestionSample
-                      label="Allergies"
-                      placeholder="Any dietary restrictions?"
-                    />
-                    <QuestionSample
-                      label="Song request"
-                      placeholder="What song gets you dancing?"
-                    />
-                    <QuestionSample
-                      label="Notes to organizer"
-                      placeholder="Any special requests?"
-                    />
+                    {settings.customQuestions.length === 0 ? (
+                      <>
+                        <QuestionSample
+                          label="Food preference"
+                          placeholder="Vegetarian, Vegan, No preference"
+                        />
+                        <QuestionSample
+                          label="Song request"
+                          placeholder="What song gets you dancing?"
+                        />
+                      </>
+                    ) : (
+                      settings.customQuestions.map((question, index) => (
+                        <QuestionSample
+                          key={`${question.question}-${index}`}
+                          label={question.question}
+                          placeholder={question.placeholder || 'Guest answer'}
+                        />
+                      ))
+                    )}
                   </View>
 
-                  <Pressable className={`h-11 flex-row items-center justify-center gap-2 rounded-xl border-2 border-dashed ${theme.isDarkMode ? 'border-purple-400/40 bg-white/5' : 'border-purple-300 bg-purple-50'}`}>
+                  <Input
+                    value={newQuestion}
+                    onChangeText={setNewQuestion}
+                    placeholder="Add a custom question"
+                  />
+
+                  <Pressable onPress={addCustomQuestion} className={`mt-3 h-11 flex-row items-center justify-center gap-2 rounded-xl border-2 border-dashed ${theme.isDarkMode ? 'border-purple-400/40 bg-white/5' : 'border-purple-300 bg-purple-50'}`}>
                     <Plus color={theme.isDarkMode ? '#d8b4fe' : '#7e22ce'} size={16} />
                     <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
                       Add Question
@@ -408,7 +480,7 @@ export default function RSVPSettingsScreen() {
         style={{ bottom: 0, paddingBottom: insets.bottom + 16 }}
       >
         <MotiPressable
-          onPress={() => router.push(`/create-event-theme-selection?category=${category}`)}
+          onPress={handleContinue}
           animate={({ pressed }) => {
             "worklet";
             return { scale: pressed ? 0.98 : 1 };
@@ -435,6 +507,18 @@ function SettingsCard({ children }: { children: React.ReactNode }) {
   return (
     <View className={`rounded-2xl border p-5 shadow-sm ${theme.surface}`}>
       {children}
+    </View>
+  );
+}
+
+function ErrorCard({ errors }: { errors: ValidationErrors }) {
+  return (
+    <View className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3">
+      {Object.entries(errors).map(([field, message]) => (
+        <Text key={field} className="text-sm font-semibold text-red-200">
+          {message}
+        </Text>
+      ))}
     </View>
   );
 }
