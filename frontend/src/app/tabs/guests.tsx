@@ -23,9 +23,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AddGuestModal from '@/components/add-guest-modal';
 import GuestDetailsModal from '@/components/guest-details-modal';
 import { useScreenTheme } from '@/hooks/use-screen-theme';
+import { useAuth } from '@/hooks/useAuth';
 import { eventStore, useEventStore } from '@/store/eventStore';
+import { guestEventStore, useGuestEventStore } from '@/store/guestEventStore';
 import { guestStore, useGuestStore } from '@/store/guestStore';
 import { safeRun } from '@/utils/safeRun';
+import { mergeUserEvents } from '@/utils/mergeUserEvents';
 import { normalizeGuestStatus } from '@/utils/rsvpStats';
 import type { EventGuest } from '@/types/guest';
 import type { Event } from '@/types/event';
@@ -52,6 +55,8 @@ type EventItem = {
   categoryColor: [string, string];
   guests: Guest[];
   source?: Event;
+  role: 'host' | 'guest';
+  permissions?: Event['permissions'];
 };
 
 const statusConfig: Record<GuestStatus, { label: string; icon: any; bg: string; text: string; border: string }> = {
@@ -65,8 +70,10 @@ export default function GuestListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = useScreenTheme();
+  const { isAuthenticated } = useAuth();
 
   const eventState = useEventStore();
+  const guestEventState = useGuestEventStore();
   const guestState = useGuestStore();
   const [guestActionError, setGuestActionError] = useState('');
   const [expandedEvents, setExpandedEvents] = useState<string[]>([]);
@@ -83,17 +90,40 @@ export default function GuestListScreen() {
   const [guestDetailsLoading, setGuestDetailsLoading] = useState(false);
 
   const events = useMemo(() => {
-    return eventState.events.map((event) => {
+    return mergeUserEvents(eventState.events, guestEventState.events).map((event) => {
       const eventId = event.uuid || event.id;
-      const guests = (guestState.guestsByEventId[eventId] ?? []).map(mapGuest);
-      return mapEventItem(event, guests);
+      const guests = event.permissions?.can_view_guest_list !== false
+        ? (guestState.guestsByEventId[eventId] ?? []).map(mapGuest)
+        : [];
+      return mapEventItem(event, guests, event.relationshipRole, event.permissions);
     });
-  }, [eventState.events, guestState.guestsByEventId]);
+  }, [eventState.events, guestEventState.events, guestState.guestsByEventId]);
 
-  const loading = eventState.isLoadingInitial && eventState.events.length === 0;
+  const loading = eventState.isLoadingInitial && eventState.events.length === 0 && guestEventState.events.length === 0;
   const refreshing = eventState.isRefreshing;
   const error = eventState.error;
-  const refresh = () => eventStore.refreshEvents({ status: 'all', per_page: 50 });
+  const refresh = async () => {
+    await Promise.all([
+      eventStore.refreshEvents({ status: 'all', per_page: 50 }),
+      isAuthenticated
+        ? guestEventStore.fetchGuestEvents().catch((error) => {
+            if (typeof __DEV__ === 'undefined' || __DEV__) {
+              console.log('[guest-list] failed to refresh guest events', error?.message || error);
+            }
+          })
+        : Promise.resolve([]),
+    ]);
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || guestEventState.loaded || guestEventState.loading) return;
+
+    guestEventStore.fetchGuestEvents().catch((error) => {
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[guest-list] failed to load guest-side events', error?.message || error);
+      }
+    });
+  }, [guestEventState.loaded, guestEventState.loading, isAuthenticated]);
 
   useEffect(() => {
     if (eventState.isLoadingInitial || eventState.isRefreshing) return;
@@ -115,8 +145,11 @@ export default function GuestListScreen() {
 
   const loadGuestsForEvent = useCallback(async (eventId: string) => {
     if (!eventId) return;
+    const selectedEvent = events.find((event) => event.id === eventId);
+    if (selectedEvent?.role === 'guest' && selectedEvent.permissions?.can_view_guest_list === false) return;
+
     await guestStore.fetchGuests(eventId, { per_page: 100 });
-  }, []);
+  }, [events]);
 
   useEffect(() => {
     const firstExpanded = expandedEvents[0];
@@ -170,8 +203,17 @@ export default function GuestListScreen() {
   }, [loadGuestsForEvent]);
 
   const hasEvents = events.length > 0;
+  const manageableEvents = useMemo(
+    () => events.filter((event) => event.role === 'host' && event.permissions?.can_add_guest !== false),
+    [events],
+  );
 
   const handleAddGuest = async () => {
+    const selectedEvent = events.find((event) => event.id === selectedEventId);
+    if (!selectedEvent || selectedEvent.role === 'guest' || selectedEvent.permissions?.can_add_guest === false) {
+      setGuestActionError('You can view this event, but you cannot add guests.');
+      return;
+    }
     if (!selectedEventId) {
       setGuestActionError('Select an event first.');
       return;
@@ -204,6 +246,12 @@ export default function GuestListScreen() {
   };
 
   const handleDeleteGuest = async (eventId: string, guestId: string) => {
+    const selectedEvent = events.find((event) => event.id === eventId);
+    if (selectedEvent?.role === 'guest' || selectedEvent?.permissions?.can_remove_guest === false) {
+      setGuestActionError('You can view this guest list, but you cannot remove guests.');
+      return;
+    }
+
     setGuestActionError('');
     await guestStore.deleteGuest(eventId, guestId);
   };
@@ -340,6 +388,9 @@ export default function GuestListScreen() {
             ) : (
               sortedEvents.map((event, eventIndex) => {
               const isExpanded = expandedEvents.includes(event.id);
+              const canViewGuests = event.role === 'host' || event.permissions?.can_view_guest_list !== false;
+              const canAddGuests = event.role === 'host' && event.permissions?.can_add_guest !== false;
+              const canRemoveGuests = event.role === 'host' && event.permissions?.can_remove_guest !== false;
               const eventStats = {
                 going: (event.guests ?? []).filter((guest) => guest.status === 'going').length,
                 maybe: (event.guests ?? []).filter((guest) => guest.status === 'maybe').length,
@@ -364,9 +415,16 @@ export default function GuestListScreen() {
                         <Text className={`text-base font-black ${theme.textOnSurface}`}>
                           {event.name}
                         </Text>
-                        <Text className={`text-xs font-medium ${theme.subText}`}>
-                          {event.guests?.length ?? 0} guests total
-                        </Text>
+                        <View className="mt-1 flex-row items-center gap-2">
+                          <Text className={`text-xs font-medium ${theme.subText}`}>
+                            {canViewGuests ? `${event.guests?.length ?? 0} guests total` : 'Guest list private'}
+                          </Text>
+                          <View className={`rounded-full px-2 py-0.5 ${event.role === 'guest' ? 'bg-sky-500/15' : 'bg-purple-500/15'}`}>
+                            <Text className={`text-[10px] font-black uppercase ${event.role === 'guest' ? 'text-sky-500' : 'text-purple-500'}`}>
+                              {event.role === 'guest' ? 'invited' : 'host'}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
 
@@ -385,7 +443,19 @@ export default function GuestListScreen() {
 
                   {isExpanded && (
                     <View className={`border-t p-4 ${theme.divider}`}>
-                      {(event.guests?.length ?? 0) === 0 ? (
+                      {!canViewGuests ? (
+                        <View className="items-center py-6">
+                          <View className={`mb-3 h-14 w-14 items-center justify-center rounded-full ${theme.surfaceMuted}`}>
+                            <UserPlus color="#9333ea" size={26} />
+                          </View>
+                          <Text className={`mb-1 text-base font-black ${theme.headerText}`}>
+                            Guest list is private
+                          </Text>
+                          <Text className={`text-center text-sm ${theme.subText}`}>
+                            The host has not made the guest list visible for this event.
+                          </Text>
+                        </View>
+                      ) : (event.guests?.length ?? 0) === 0 ? (
                         <View className="items-center py-6">
                           <View className={`mb-3 h-14 w-14 items-center justify-center rounded-full ${theme.surfaceMuted}`}>
                             <UserPlus color="#9333ea" size={26} />
@@ -403,17 +473,19 @@ export default function GuestListScreen() {
                                 No guests yet
                               </Text>
                               <Text className={`mb-4 text-center text-sm ${theme.subText}`}>
-                                Add guests to this event and track their RSVP.
+                                {canAddGuests ? 'Add guests to this event and track their RSVP.' : 'No guests are visible for this event yet.'}
                               </Text>
-                              <Pressable
-                                onPress={() => {
-                                  setSelectedEventId(event.id);
-                                  setShowAddModal(true);
-                                }}
-                                className="rounded-xl bg-purple-600 px-5 py-2.5"
-                              >
-                                <Text className="font-bold text-white">Add Guest</Text>
-                              </Pressable>
+                              {canAddGuests && (
+                                <Pressable
+                                  onPress={() => {
+                                    setSelectedEventId(event.id);
+                                    setShowAddModal(true);
+                                  }}
+                                  className="rounded-xl bg-purple-600 px-5 py-2.5"
+                                >
+                                  <Text className="font-bold text-white">Add Guest</Text>
+                                </Pressable>
+                              )}
                             </>
                           )}
                         </View>
@@ -425,13 +497,13 @@ export default function GuestListScreen() {
                               guest={guest}
                               index={guestIndex}
                               theme={theme}
-                              onDelete={() =>
-                                void safeRun(
-                                  () => handleDeleteGuest(event.id, guest.id),
-                                  'Failed to delete guest.',
-                                  setGuestActionError,
-                                )
-                              }
+                              onDelete={canRemoveGuests ? () =>
+                                  void safeRun(
+                                    () => handleDeleteGuest(event.id, guest.id),
+                                    'Failed to delete guest.',
+                                    setGuestActionError,
+                                  )
+                                : undefined}
                               onPress={() => {
                                 void safeRun(
                                   () => handleOpenGuestDetails(event, guest),
@@ -453,41 +525,47 @@ export default function GuestListScreen() {
         </View>
       </ScrollView>
 
-      <Pressable
-        onPress={() => {
-          if (hasEvents) setShowAddModal(true);
-          else router.push('/create-event-categories');
-        }}
-        style={{
-          position: 'absolute',
-          right: 20,
-          bottom: insets.bottom + 100,
-          zIndex: 30,
-        }}
-      >
-        <LinearGradient
-          colors={['#a855f7', '#9333ea', '#ec4899']}
+      {manageableEvents.length > 0 && (
+        <Pressable
+          onPress={() => {
+            setSelectedEventId((current) =>
+              current && manageableEvents.some((event) => event.id === current)
+                ? current
+                : manageableEvents[0]?.id || '',
+            );
+            setShowAddModal(true);
+          }}
           style={{
-            width: 64,
-            height: 64,
-            borderRadius: 32,
-            alignItems: 'center',
-            justifyContent: 'center',
-            shadowColor: '#9333ea',
-            shadowOffset: { width: 0, height: 10 },
-            shadowOpacity: 0.35,
-            shadowRadius: 15,
-            elevation: 10,
+            position: 'absolute',
+            right: 20,
+            bottom: insets.bottom + 100,
+            zIndex: 30,
           }}
         >
-          <UserPlus color="white" size={24} strokeWidth={2.5} />
-        </LinearGradient>
-      </Pressable>
+          <LinearGradient
+            colors={['#a855f7', '#9333ea', '#ec4899']}
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: '#9333ea',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.35,
+              shadowRadius: 15,
+              elevation: 10,
+            }}
+          >
+            <UserPlus color="white" size={24} strokeWidth={2.5} />
+          </LinearGradient>
+        </Pressable>
+      )}
 
       <AddGuestModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
-        events={events}
+        events={manageableEvents}
         selectedEventId={selectedEventId}
         setSelectedEventId={setSelectedEventId}
         newGuestName={newGuestName}
@@ -508,6 +586,7 @@ export default function GuestListScreen() {
         guest={selectedGuestDetails?.guest}
         event={selectedGuestDetails?.event}
         loading={guestDetailsLoading}
+        canViewPrivate={selectedGuestDetails?.event?.permissions?.can_view_guest_answers !== false}
         onClose={() => setSelectedGuestDetails(null)}
       />
     </LinearGradient>
@@ -524,7 +603,7 @@ function GuestRow({
   guest: Guest;
   index: number;
   theme: ReturnType<typeof useScreenTheme>;
-  onDelete: () => void;
+  onDelete?: () => void;
   onPress: () => void;
 }) {
   const status = statusConfig[guest.status];
@@ -579,12 +658,14 @@ function GuestRow({
           </View>
         </View>
 
-        <Pressable
-          onPress={onDelete}
-          className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
-        >
-          <Trash2 color="#dc2626" size={16} />
-        </Pressable>
+        {onDelete && (
+          <Pressable
+            onPress={onDelete}
+            className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
+          >
+            <Trash2 color="#dc2626" size={16} />
+          </Pressable>
+        )}
       </Pressable>
     </MotiView>
   );
@@ -626,7 +707,12 @@ function SortOption({
   );
 }
 
-function mapEventItem(event: Event, guests: Guest[] = []): EventItem {
+function mapEventItem(
+  event: Event,
+  guests: Guest[] = [],
+  role: EventItem['role'] = 'host',
+  permissions?: Event['permissions'],
+): EventItem {
   const slug = event.category_slug || (typeof event.category === 'string' ? event.category : event.category?.slug) || 'party';
 
   return {
@@ -636,6 +722,8 @@ function mapEventItem(event: Event, guests: Guest[] = []): EventItem {
     categoryColor: categoryColors(slug),
     guests: Array.isArray(guests) ? guests : [],
     source: event,
+    role,
+    permissions,
   };
 }
 

@@ -12,7 +12,7 @@ import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { eventsApi } from '@/api/eventsApi';
 import { categoryStore, useCategoryStore } from '@/store/categoryStore';
-import { createEventStore } from '@/store/createEventStore';
+import { createEventStore, useCreateEventStore } from '@/store/createEventStore';
 import { eventStore } from '@/store/eventStore';
 import { themeStore, useThemeStore } from '@/store/themeStore';
 import { imageUriToFormData } from '@/utils/upload';
@@ -41,12 +41,13 @@ type ThemeOption = {
 export default function ThemeSelectionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { category = 'birthday' } = useLocalSearchParams<{ category?: string }>();
+  const { category } = useLocalSearchParams<{ category?: string }>();
   const themeState = useThemeStore();
   const categoryState = useCategoryStore();
-  const draft = createEventStore.get();
+  const draft = useCreateEventStore();
+  const selectedCategorySlug = draft.categorySlug || category || '';
 
-  const [selectedFilter, setSelectedFilter] = useState('all');
+  const [selectedFilter, setSelectedFilter] = useState(selectedCategorySlug || 'all');
   const [selectedTheme, setSelectedTheme] = useState<string | null>(draft.themeId || null);
   const [themes, setThemes] = useState<ThemeOption[]>([]);
   const [loadingThemes, setLoadingThemes] = useState(!themeState.isInitialLoaded);
@@ -59,6 +60,10 @@ export default function ThemeSelectionScreen() {
       categoryStore.fetchCategories().catch(() => undefined);
     }
   }, [categoryState.isInitialLoaded]);
+
+  useEffect(() => {
+    setSelectedFilter(selectedCategorySlug || 'all');
+  }, [selectedCategorySlug]);
 
   useEffect(() => {
     const loadThemes = async () => {
@@ -428,7 +433,7 @@ function mapApiTheme(theme: ApiTheme): ThemeOption {
   const primary = String(config.primary || '#9333ea');
   const accent = String(config.accent || '#ec4899');
   const background = String(config.background || '#1F1B2E');
-  const categories = normalizeThemeCategories(config);
+  const categories = normalizeThemeCategories(config, theme);
   const category = categories[0] || 'all';
 
   return {
@@ -450,14 +455,18 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1).replace(/-/g, ' ');
 }
 
-function normalizeThemeCategories(config: Record<string, unknown>) {
+function normalizeThemeCategories(config: Record<string, unknown>, theme?: ApiTheme) {
   const categories = config.categories;
 
   if (Array.isArray(categories)) {
     return Array.from(new Set(categories.map(String).filter(Boolean)));
   }
 
-  const category = config.category || config.event_category;
+  const category =
+    config.category ||
+    config.event_category ||
+    (theme as any)?.category_slug ||
+    (typeof (theme as any)?.category === 'string' ? (theme as any).category : (theme as any)?.category?.slug);
 
   return category ? [String(category)] : ['all'];
 }

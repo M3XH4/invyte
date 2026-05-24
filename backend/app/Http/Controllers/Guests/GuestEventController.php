@@ -19,6 +19,7 @@ class GuestEventController extends ApiController
                 'event.category',
                 'event.theme',
                 'event.qrCode',
+                'event.host',
                 'answers.question',
             ])
             ->where(function ($query) use ($user) {

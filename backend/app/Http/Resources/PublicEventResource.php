@@ -4,12 +4,14 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Services\EventPermissionService;
 
 class PublicEventResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
         $publicUrl = $this->qrCode?->url ?: rtrim((string) config('app.frontend_url', config('app.url')), '/').'/public-rsvp/'.$this->slug;
+        $permissions = app(EventPermissionService::class)->forUser($this->resource, $request->user());
 
         return [
             'id' => $this->id,
@@ -26,6 +28,8 @@ class PublicEventResource extends JsonResource
             'venue_address' => $this->venue_address,
             'venueAddress' => $this->venue_address,
             'location' => $this->venue_address,
+            'status' => $this->computedStatus(),
+            'timeline_status' => $this->computedStatus(),
             'rsvp_deadline' => $this->rsvp_deadline?->toISOString(),
             'rsvp_enabled' => $this->rsvp_enabled,
             'allow_plus_ones' => $this->allow_plus_ones,
@@ -34,6 +38,7 @@ class PublicEventResource extends JsonResource
             'rsvp_options' => ['going', 'maybe', 'not_going'],
             'public_url' => $publicUrl,
             'qr_value' => $publicUrl,
+            'permissions' => $permissions,
             'questions' => RsvpQuestionResource::collection($this->whenLoaded('questions')),
             'guests' => $this->show_guest_list
                 ? $this->guests->map(fn ($guest) => [

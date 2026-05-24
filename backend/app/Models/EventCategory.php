@@ -10,7 +10,22 @@ class EventCategory extends Model
 {
     use HasUuidPrimaryKey;
 
-    protected $fillable = ['name', 'slug', 'icon', 'color'];
+    protected $fillable = [
+        'name',
+        'slug',
+        'icon',
+        'image',
+        'color',
+        'description',
+        'is_active',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+        ];
+    }
 
     public function events(): HasMany
     {

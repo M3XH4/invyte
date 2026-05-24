@@ -7,6 +7,13 @@ import { normalizeEvent } from '@/utils/rsvpStats';
 export type PublicRsvpSubmitResponse = {
   guest: EventGuest;
   event_stats?: RSVPStats;
+  event?: Event;
+};
+
+export type MyRsvpResponse = {
+  already_responded: boolean;
+  event: Event;
+  guest?: EventGuest | null;
 };
 
 export const publicRsvpApi = {
@@ -16,5 +23,15 @@ export const publicRsvpApi = {
 
   submit(slug: string, payload: RSVPSubmissionPayload) {
     return api.post<PublicRsvpSubmitResponse>(`/public/events/${slug}/rsvp`, payload);
+  },
+
+  async myRsvp(slug: string, email?: string) {
+    const response = await api.get<MyRsvpResponse>(`/public/events/${slug}/my-rsvp`, {
+      params: email ? { email } : undefined,
+    });
+    return {
+      ...response,
+      event: normalizeEvent(response.event),
+    };
   },
 };

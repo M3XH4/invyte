@@ -1,10 +1,21 @@
 <?php
 
+use App\Http\Controllers\Admin\AnalyticsController as AdminAnalyticsController;
+use App\Http\Controllers\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
+use App\Http\Controllers\Admin\EventController as AdminEventController;
+use App\Http\Controllers\Admin\GuestController as AdminGuestController;
+use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
+use App\Http\Controllers\Admin\ReportController as AdminReportController;
+use App\Http\Controllers\Admin\SearchController as AdminSearchController;
+use App\Http\Controllers\Admin\SettingsController as AdminSettingsController;
+use App\Http\Controllers\Admin\ThemeController as AdminThemeController;
+use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Events\EventController;
 use App\Http\Controllers\Events\EventMetadataController;
-use App\Http\Controllers\Guests\GuestEventController;
 use App\Http\Controllers\Guests\GuestController;
+use App\Http\Controllers\Guests\GuestEventController;
 use App\Http\Controllers\Notifications\NotificationController;
 use App\Http\Controllers\Profile\ProfileController;
 use App\Http\Controllers\RSVP\RsvpController;
@@ -34,6 +45,7 @@ Route::middleware('throttle:60,1')->group(function () {
 
     Route::prefix('public')->group(function () {
         Route::get('/events/{slug}', [RsvpController::class, 'publicShow']);
+        Route::get('/events/{slug}/my-rsvp', [RsvpController::class, 'myRsvp']);
         Route::post('/events/{slug}/rsvp', [RsvpController::class, 'publicSubmit']);
     });
 });
@@ -72,6 +84,8 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('/events/{event}/rsvp/preview', [RsvpController::class, 'preview']);
     Route::get('/events/{event}/rsvp-preview', [RsvpController::class, 'preview']);
     Route::get('/events/{event}/rsvp/stats', [RsvpController::class, 'stats']);
+    Route::get('/events/{event}/my-rsvp', [RsvpController::class, 'myEventRsvp']);
+    Route::put('/events/{event}/my-rsvp', [RsvpController::class, 'updateMyEventRsvp']);
     Route::get('/events/{event}/analytics', [RsvpController::class, 'stats']);
     Route::get('/events/{event}/rsvp/questions', [RsvpController::class, 'questions']);
     Route::post('/events/{event}/rsvp/questions', [RsvpController::class, 'storeQuestion']);
@@ -90,4 +104,42 @@ Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
     Route::get('/profile/stats', [ProfileController::class, 'stats']);
 
     Route::get('/guest/events', [GuestEventController::class, 'index']);
+
+    Route::prefix('admin')->middleware('admin')->group(function () {
+        Route::get('/search', AdminSearchController::class);
+        Route::get('/dashboard', [AdminDashboardController::class, 'index']);
+        Route::get('/analytics/rsvp', [AdminAnalyticsController::class, 'rsvp']);
+        Route::get('/reports', [AdminReportController::class, 'index']);
+        Route::get('/settings', [AdminSettingsController::class, 'show']);
+        Route::put('/settings', [AdminSettingsController::class, 'update']);
+
+        Route::get('/users', [AdminUserController::class, 'index']);
+        Route::get('/users/{user}', [AdminUserController::class, 'show']);
+        Route::put('/users/{user}', [AdminUserController::class, 'update']);
+        Route::delete('/users/{user}', [AdminUserController::class, 'destroy']);
+
+        Route::get('/events', [AdminEventController::class, 'index']);
+        Route::get('/events/archived/list', [AdminEventController::class, 'archived']);
+        Route::get('/events/{event}', [AdminEventController::class, 'show']);
+        Route::post('/events/{event}/archive', [AdminEventController::class, 'archive']);
+        Route::post('/events/{event}/restore', [AdminEventController::class, 'restore']);
+        Route::delete('/events/{event}', [AdminEventController::class, 'destroy']);
+
+        Route::get('/guests', [AdminGuestController::class, 'index']);
+
+        Route::get('/categories', [AdminCategoryController::class, 'index']);
+        Route::post('/categories', [AdminCategoryController::class, 'store']);
+        Route::put('/categories/{category}', [AdminCategoryController::class, 'update']);
+        Route::delete('/categories/{category}', [AdminCategoryController::class, 'destroy']);
+
+        Route::get('/themes', [AdminThemeController::class, 'index']);
+        Route::post('/themes', [AdminThemeController::class, 'store']);
+        Route::put('/themes/{theme}', [AdminThemeController::class, 'update']);
+        Route::delete('/themes/{theme}', [AdminThemeController::class, 'destroy']);
+
+        Route::get('/notifications/unread-count', [AdminNotificationController::class, 'unreadCount']);
+        Route::get('/notifications', [AdminNotificationController::class, 'index']);
+        Route::patch('/notifications/{notification}/read', [AdminNotificationController::class, 'markRead']);
+        Route::post('/notifications/read-all', [AdminNotificationController::class, 'markAllRead']);
+    });
 });

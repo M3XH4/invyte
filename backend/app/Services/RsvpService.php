@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Event;
 use App\Models\EventGuest;
 use App\Models\RsvpQuestion;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -36,10 +37,14 @@ class RsvpService
         return $event;
     }
 
-    public function submit(Event $event, array $data): EventGuest
+    public function submit(Event $event, array $data, ?User $user = null): EventGuest
     {
         if (! $event->rsvp_enabled) {
             throw ValidationException::withMessages(['event' => 'RSVP is disabled for this event.']);
+        }
+
+        if ($event->archived_at || $event->computedStatus() === 'past') {
+            throw ValidationException::withMessages(['event' => 'This event has already passed.']);
         }
 
         if ($event->rsvp_deadline && $event->rsvp_deadline->isPast()) {
@@ -50,10 +55,17 @@ class RsvpService
             throw ValidationException::withMessages(['plus_ones' => 'Plus-ones are not enabled for this event.']);
         }
 
-        return DB::transaction(function () use ($event, $data) {
-            $guest = $this->resolveGuest($event, $data);
+        return DB::transaction(function () use ($event, $data, $user) {
+            $guest = $this->resolveGuest($event, $data, $user);
+
+            if ($guest->responded_at) {
+                throw ValidationException::withMessages([
+                    'email' => 'You have already responded to this event.',
+                ]);
+            }
 
             $guest->forceFill([
+                'user_id' => $user?->id ?? $guest->user_id,
                 'name' => $data['name'] ?? $guest->name,
                 'email' => $data['email'] ?? $guest->email,
                 'phone_number' => $data['phone_number'] ?? $guest->phone_number,
@@ -111,7 +123,98 @@ class RsvpService
         $question->delete();
     }
 
-    private function resolveGuest(Event $event, array $data): EventGuest
+    public function existingRsvp(Event $event, ?User $user = null, ?string $email = null): ?EventGuest
+    {
+        return $event->guests()
+            ->with(['answers.question', 'event'])
+            ->whereNotNull('responded_at')
+            ->where(function ($query) use ($user, $email) {
+                if ($user) {
+                    $query->where('user_id', $user->id);
+
+                    if ($user->email) {
+                        $query->orWhere('email', $user->email);
+                    }
+                }
+
+                if ($email) {
+                    $query->orWhere('email', $email);
+                }
+            })
+            ->first();
+    }
+
+    public function ownRsvp(Event $event, User $user): ?EventGuest
+    {
+        return $event->guests()
+            ->with(['answers.question', 'event'])
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+
+                if ($user->email) {
+                    $query->orWhere('email', $user->email);
+                }
+            })
+            ->first();
+    }
+
+    public function updateOwnRsvp(Event $event, User $user, array $data): EventGuest
+    {
+        $guest = $this->ownRsvp($event, $user);
+
+        if (! $guest) {
+            throw ValidationException::withMessages(['guest' => 'You are not a guest for this event.']);
+        }
+
+        if (! $event->rsvp_enabled) {
+            throw ValidationException::withMessages(['event' => 'RSVP is disabled for this event.']);
+        }
+
+        if ($event->archived_at || $event->computedStatus() === 'past') {
+            throw ValidationException::withMessages(['event' => 'This event has already passed.']);
+        }
+
+        if ($event->rsvp_deadline && $event->rsvp_deadline->isPast()) {
+            throw ValidationException::withMessages(['event' => 'The RSVP deadline has passed.']);
+        }
+
+        if (! $event->allow_plus_ones && (int) ($data['plus_ones'] ?? 0) > 0) {
+            throw ValidationException::withMessages(['plus_ones' => 'Plus-ones are not enabled for this event.']);
+        }
+
+        return DB::transaction(function () use ($event, $guest, $data) {
+            $guest->forceFill([
+                'response_status' => $data['response_status'],
+                'plus_ones' => $data['plus_ones'] ?? 0,
+                'responded_at' => now(),
+                'invite_status' => $guest->invite_status === 'pending' ? 'opened' : $guest->invite_status,
+            ])->save();
+
+            $this->storeAnswers($event, $guest, $data['answers'] ?? []);
+
+            $this->notifications->create(
+                $event->user_id,
+                'RSVP updated',
+                "{$guest->name} updated their RSVP to {$guest->response_status}.",
+                'rsvp_updated',
+                ['event_id' => $event->id, 'guest_id' => $guest->id, 'slug' => $event->slug]
+            );
+
+            $this->activityLogs->record(
+                $event,
+                null,
+                'rsvp_updated_by_guest',
+                'RSVP updated by guest',
+                "{$guest->name} updated their RSVP to {$guest->response_status}.",
+                $guest,
+                ['guest_id' => $guest->id, 'response_status' => $guest->response_status]
+            );
+
+            return $guest->refresh()->load('answers.question');
+        });
+    }
+
+    private function resolveGuest(Event $event, array $data, ?User $user = null): EventGuest
     {
         if (! empty($data['guest_id'])) {
             $guest = $event->guests()->whereKey($data['guest_id'])->first();
@@ -127,6 +230,7 @@ class RsvpService
             return EventGuest::firstOrCreate(
                 ['event_id' => $event->id, 'email' => $data['email']],
                 [
+                    'user_id' => $user?->id,
                     'name' => $data['name'],
                     'phone_number' => $data['phone_number'] ?? null,
                     'invite_status' => 'opened',
@@ -135,6 +239,7 @@ class RsvpService
         }
 
         return $event->guests()->create([
+            'user_id' => $user?->id,
             'name' => $data['name'],
             'phone_number' => $data['phone_number'] ?? null,
             'invite_status' => 'opened',

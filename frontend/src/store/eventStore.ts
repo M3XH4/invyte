@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { eventsApi } from '@/api/eventsApi';
 import type { PaginationMeta } from '@/types/api';
 import type { Event, EventFilters } from '@/types/event';
+import { getEventComputedStatus } from '@/utils/eventStatus';
 import { deriveEventStatsFromGuests, normalizeEvent, normalizeEventRsvpStats } from '@/utils/rsvpStats';
 
 const EVENTS_STALE_MS = 2 * 60 * 1000;
@@ -88,9 +89,7 @@ function getEventDateTime(event: Event) {
 }
 
 function isUpcomingEvent(event: Event) {
-  if (event.status === 'upcoming') return true;
-  const value = getEventDateTime(event);
-  return !!value && value.getTime() > Date.now();
+  return getEventComputedStatus(event) === 'upcoming';
 }
 
 function sortUpcomingEvents(events: Event[]) {

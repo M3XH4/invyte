@@ -11,7 +11,12 @@ class SubmitRsvpRequest extends ApiFormRequest
     {
         return [
             'guest_id' => ['nullable', 'uuid', 'exists:event_guests,id'],
-            'name' => ['required_without:guest_id', 'string', 'max:180'],
+            'name' => [
+                Rule::requiredIf(fn () => ! $this->filled('guest_id') && ! $this->user('sanctum')),
+                'nullable',
+                'string',
+                'max:180',
+            ],
             'email' => ['nullable', 'email', 'max:255'],
             'phone_number' => ['nullable', 'string', 'max:40'],
             'response_status' => ['required', Rule::in(['going', 'maybe', 'not_going'])],

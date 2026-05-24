@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, Calendar, CheckCircle, Clock, HelpCircle, MapPin, Send, Users, XCircle } from 'lucide-react-native';
+import { ArrowLeft, Calendar, CheckCircle, Clock, HelpCircle, MapPin, Minus, Plus, Send, Users, XCircle } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import { MotiPressable } from 'moti/interactions';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,7 +11,9 @@ import { publicRsvpApi } from '@/api/publicRsvpApi';
 import { useAuth } from '@/hooks/useAuth';
 import { guestEventStore } from '@/store/guestEventStore';
 import { formatDateForDisplay, formatDateTimeForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
+import { getEventComputedStatus, isEventRsvpOpen } from '@/utils/eventStatus';
 import type { Event } from '@/types/event';
+import type { EventGuest } from '@/types/guest';
 
 const fallbackCover = 'https://www.magicjumprentals.com/clients/3/assets/girl_birthday_party.jpg';
 
@@ -31,11 +33,13 @@ export default function PublicRsvpScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [alreadyRespondedGuest, setAlreadyRespondedGuest] = useState<EventGuest | null>(null);
   const [error, setError] = useState('');
   const [selectedResponse, setSelectedResponse] = useState<'going' | 'maybe' | 'not_going' | null>(null);
   const [guestName, setGuestName] = useState(user?.name || '');
   const [guestEmail, setGuestEmail] = useState(user?.email || '');
-  const [plusOnes, setPlusOnes] = useState('0');
+  const [bringingPlusOne, setBringingPlusOne] = useState(false);
+  const [plusOnes, setPlusOnes] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -51,6 +55,10 @@ export default function PublicRsvpScreen() {
         if (!slug) throw new Error('Missing RSVP link.');
         const nextEvent = await publicRsvpApi.getEvent(slug);
         setEvent(nextEvent);
+        if (user?.email) {
+          const myRsvp = await publicRsvpApi.myRsvp(slug);
+          if (myRsvp.already_responded && myRsvp.guest) setAlreadyRespondedGuest(myRsvp.guest);
+        }
       } catch (error: any) {
         setError(error.message || 'Unable to load RSVP event.');
       } finally {
@@ -59,12 +67,15 @@ export default function PublicRsvpScreen() {
     };
 
     loadEvent();
-  }, [slug]);
+  }, [slug, user?.email]);
 
   const eventDate = formatDateForDisplay(event?.date || event?.start_date || '') || 'Event date';
   const eventTime = formatTimeForDisplay(event?.time || event?.start_time || '') || 'Event time';
   const deadline = event?.rsvp_deadline ? formatDateTimeForDisplay(event.rsvp_deadline) : '';
   const publicGuests = Array.isArray(event?.guests) ? event.guests : [];
+  const maxCompanions = Math.max(1, Number(event?.max_companions || 1));
+  const eventStatus = event ? getEventComputedStatus(event) : 'upcoming';
+  const rsvpOpen = event ? isEventRsvpOpen(event) : false;
 
   const handleSubmit = async () => {
     if (!event || !selectedResponse) return;
@@ -86,11 +97,17 @@ export default function PublicRsvpScreen() {
     try {
       setSubmitting(true);
       setError('');
+      const existing = await publicRsvpApi.myRsvp(slug, guestEmail.trim());
+      if (existing.already_responded && existing.guest) {
+        setAlreadyRespondedGuest(existing.guest);
+        return;
+      }
+
       const response = await publicRsvpApi.submit(slug, {
         name: guestName.trim(),
         email: guestEmail.trim(),
         response_status: selectedResponse,
-        plus_ones: Number(plusOnes) || 0,
+        plus_ones: bringingPlusOne ? plusOnes : 0,
         answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })),
       });
 
@@ -103,8 +120,27 @@ export default function PublicRsvpScreen() {
       }
 
       setSubmitted(true);
+      if (response.event) {
+        guestEventStore.addGuestEvent({
+          ...response,
+          event: response.event,
+          permissions: {
+            role: 'guest',
+            can_view_details: true,
+            can_view_guest_list: !!response.event.show_guest_list,
+            can_edit_event: false,
+            can_add_guest: false,
+            can_delete_event: false,
+            can_manage_attendance: false,
+          },
+        } as any);
+      }
       if (user) guestEventStore.fetchGuestEvents().catch(() => undefined);
     } catch (error: any) {
+      if (error?.code === 'ALREADY_RESPONDED' && error?.data?.guest) {
+        setAlreadyRespondedGuest(error.data.guest);
+        return;
+      }
       setError(error.message || 'Unable to submit RSVP.');
       Alert.alert('Unable to submit RSVP', error.message || 'Please try again.');
     } finally {
@@ -165,7 +201,21 @@ export default function PublicRsvpScreen() {
                 {!!deadline && <Text className="text-xs font-bold text-fuchsia-100">RSVP deadline: {deadline}</Text>}
               </Panel>
 
-              {submitted ? (
+              {eventStatus === 'past' ? (
+                <Panel>
+                  <Text className="mb-2 text-center text-xl font-black text-white">This event has already passed</Text>
+                  <Text className="text-center text-sm font-semibold leading-5 text-white/70">
+                    RSVP responses are closed for {event.title}.
+                  </Text>
+                </Panel>
+              ) : !rsvpOpen ? (
+                <Panel>
+                  <Text className="mb-2 text-center text-xl font-black text-white">RSVP Closed</Text>
+                  <Text className="text-center text-sm font-semibold leading-5 text-white/70">
+                    This RSVP is no longer accepting responses.
+                  </Text>
+                </Panel>
+              ) : submitted ? (
                 <Panel>
                   <View className="mx-auto mb-4 h-16 w-16 items-center justify-center rounded-full bg-emerald-400/20">
                     <CheckCircle color="#34d399" size={34} />
@@ -211,7 +261,16 @@ export default function PublicRsvpScreen() {
                     <Field label="Your Name" value={guestName} onChangeText={setGuestName} placeholder="Enter your name" />
                     <Field label="Email" value={guestEmail} onChangeText={setGuestEmail} placeholder="you@example.com" keyboardType="email-address" />
                     {selectedResponse === 'going' && event.allow_plus_ones && (
-                      <Field label="Plus Ones" value={plusOnes} onChangeText={setPlusOnes} keyboardType="numeric" placeholder="0" />
+                      <PlusOnePicker
+                        bringingPlusOne={bringingPlusOne}
+                        plusOnes={plusOnes}
+                        maxCompanions={maxCompanions}
+                        onToggle={(enabled) => {
+                          setBringingPlusOne(enabled);
+                          setPlusOnes(enabled ? Math.max(1, plusOnes || 1) : 0);
+                        }}
+                        onChange={setPlusOnes}
+                      />
                     )}
                   </Panel>
 
@@ -259,8 +318,8 @@ export default function PublicRsvpScreen() {
                     <Users color="#f0abfc" size={18} />
                     <Text className="text-lg font-black text-white">Guest List</Text>
                   </View>
-                  {publicGuests.slice(0, 20).map((guest) => (
-                    <View key={guest.uuid || guest.id} className="mb-2 flex-row items-center justify-between rounded-xl bg-white/10 px-3 py-2">
+                  {publicGuests.slice(0, 20).map((guest, index) => (
+                    <View key={`public-guest-${guest.uuid || guest.id || guest.name}-${index}`} className="mb-2 flex-row items-center justify-between rounded-xl bg-white/10 px-3 py-2">
                       <Text className="font-bold text-white">{guest.name}</Text>
                       <Text className="text-xs font-bold text-white/65">{statusLabel(guest.response_status)}</Text>
                     </View>
@@ -271,6 +330,48 @@ export default function PublicRsvpScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Modal visible={!!alreadyRespondedGuest} transparent animationType="fade">
+        <View className="flex-1 items-center justify-center bg-black/60 px-6">
+          <View className="w-full rounded-[28px] border border-white/10 bg-[#1f1638] p-6">
+            <View className="mx-auto mb-4 h-16 w-16 items-center justify-center rounded-full bg-amber-400/15">
+              <CheckCircle color="#facc15" size={34} />
+            </View>
+            <Text className="mb-2 text-center text-xl font-black text-white">
+              You already responded
+            </Text>
+            <Text className="mb-6 text-center text-sm font-semibold leading-5 text-white/70">
+              This RSVP has already been submitted for {alreadyRespondedGuest?.email || alreadyRespondedGuest?.name}.
+            </Text>
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={() => setAlreadyRespondedGuest(null)}
+                className="h-12 flex-1 items-center justify-center rounded-xl bg-white/10"
+              >
+                <Text className="font-bold text-white">Close</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (user && event) {
+                    router.replace({
+                      pathname: '/event-management',
+                      params: { eventId: event.uuid || event.id },
+                    });
+                    return;
+                  }
+
+                  setAlreadyRespondedGuest(null);
+                }}
+                className="h-12 flex-1 overflow-hidden rounded-xl"
+              >
+                <LinearGradient colors={['#9333ea', '#ec4899']} className="h-full items-center justify-center">
+                  <Text className="font-bold text-white">View Event</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
@@ -284,6 +385,64 @@ function Info({ icon: Icon, text }: { icon: any; text: string }) {
     <View className="flex-row items-center gap-2">
       <Icon color="white" size={15} />
       <Text className="flex-1 text-sm font-bold text-white/85">{text}</Text>
+    </View>
+  );
+}
+
+function PlusOnePicker({
+  bringingPlusOne,
+  plusOnes,
+  maxCompanions,
+  onToggle,
+  onChange,
+}: {
+  bringingPlusOne: boolean;
+  plusOnes: number;
+  maxCompanions: number;
+  onToggle: (enabled: boolean) => void;
+  onChange: (value: number) => void;
+}) {
+  const nextValue = Math.min(maxCompanions, Math.max(1, plusOnes || 1));
+
+  return (
+    <View className="mb-3">
+      <Text className="mb-2 text-sm font-bold text-white/75">Will you bring a plus one?</Text>
+      <View className="flex-row gap-3">
+        <Pressable
+          onPress={() => onToggle(false)}
+          className={`h-12 flex-1 items-center justify-center rounded-xl border ${
+            !bringingPlusOne ? 'border-white/40 bg-white/25' : 'border-white/10 bg-white/10'
+          }`}
+        >
+          <Text className="text-sm font-black text-white">No plus one</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => onToggle(true)}
+          className={`h-12 flex-1 items-center justify-center rounded-xl border ${
+            bringingPlusOne ? 'border-fuchsia-300/70 bg-fuchsia-400/25' : 'border-white/10 bg-white/10'
+          }`}
+        >
+          <Text className="text-sm font-black text-white">Bringing a plus one</Text>
+        </Pressable>
+      </View>
+
+      {bringingPlusOne && maxCompanions > 1 && (
+        <View className="mt-3 flex-row items-center justify-between rounded-xl border border-white/10 bg-white/10 px-3 py-2">
+          <Pressable
+            onPress={() => onChange(Math.max(1, nextValue - 1))}
+            className="h-9 w-9 items-center justify-center rounded-lg bg-white/10"
+          >
+            <Minus color="white" size={16} />
+          </Pressable>
+          <Text className="text-base font-black text-white">{nextValue}</Text>
+          <Pressable
+            onPress={() => onChange(Math.min(maxCompanions, nextValue + 1))}
+            className="h-9 w-9 items-center justify-center rounded-lg bg-white/10"
+          >
+            <Plus color="white" size={16} />
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

@@ -2,6 +2,7 @@ export type ApiResponse<T> = {
   success: boolean;
   message: string;
   data: T;
+  code?: string;
   errors?: Record<string, string[]>;
 };
 
@@ -31,11 +32,15 @@ export type PaginatedResponse<T> = {
 export class ApiError extends Error {
   status?: number;
   errors?: Record<string, string[]>;
+  code?: string;
+  data?: unknown;
 
-  constructor(message: string, status?: number, errors?: Record<string, string[]>) {
+  constructor(message: string, status?: number, errors?: Record<string, string[]>, code?: string, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.errors = errors;
+    this.code = code;
+    this.data = data;
   }
 }

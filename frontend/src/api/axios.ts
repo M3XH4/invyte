@@ -253,7 +253,13 @@ apiClient.interceptors.response.use(
         : requestError.message) ||
       'Something went wrong. Please try again.';
 
-    throw new ApiError(message, requestError.response?.status, requestError.response?.data?.errors);
+    throw new ApiError(
+      message,
+      requestError.response?.status,
+      requestError.response?.data?.errors,
+      requestError.response?.data?.code,
+      requestError.response?.data?.data,
+    );
   },
 );
 

@@ -28,9 +28,20 @@ class GuestController extends ApiController
 
     public function index(Request $request, Event $event): JsonResponse
     {
-        $this->authorize('manage', $event);
+        $canManage = $request->user()->can('manage', $event);
+        abort_unless($canManage || $event->show_guest_list, 403);
 
         $guests = $this->guests->list($event, $request->only(['search', 'status', 'per_page']));
+
+        if (! $canManage) {
+            return $this->success('Guests loaded', $guests->getCollection()->map(fn (EventGuest $guest) => [
+                'id' => $guest->id,
+                'uuid' => $guest->id,
+                'name' => $guest->name,
+                'response_status' => $guest->response_status,
+                'status' => $guest->response_status,
+            ]));
+        }
 
         return $this->success('Guests loaded', EventGuestResource::collection($guests));
     }
@@ -59,8 +70,21 @@ class GuestController extends ApiController
 
     public function show(Event $event, EventGuest $guest): JsonResponse
     {
-        $this->authorize('manage', $event);
+        $canManage = request()->user()->can('manage', $event);
+        abort_unless($canManage || $event->show_guest_list, 403);
         abort_unless($guest->event_id === $event->id, 404);
+
+        if (! $canManage) {
+            return $this->success('Guest details loaded', [
+                'guest' => [
+                    'id' => $guest->id,
+                    'uuid' => $guest->id,
+                    'name' => $guest->name,
+                    'response_status' => $guest->response_status,
+                    'status' => $guest->response_status,
+                ],
+            ]);
+        }
 
         return $this->success('Guest details loaded', new GuestDetailsResource(
             $guest->load(['answers.question', 'event'])

@@ -41,7 +41,7 @@ class EventController extends ApiController
         $this->authorize('view', $event);
 
         $event = $this->events->withCounts(Event::whereKey($event->id))
-            ->with(['category', 'theme', 'qrCode', 'questions', 'guests.answers.question', 'media'])
+            ->with(['category', 'theme', 'qrCode', 'questions', 'guests.answers.question', 'media', 'host'])
             ->firstOrFail();
 
         return $this->success('Event loaded', new EventResource($event));
@@ -101,7 +101,7 @@ class EventController extends ApiController
 
     public function duplicate(Request $request, Event $event): JsonResponse
     {
-        $this->authorize('view', $event);
+        $this->authorize('update', $event);
 
         $copy = $this->events->duplicate($event->load(['questions', 'media']), $request->user());
 
@@ -110,7 +110,7 @@ class EventController extends ApiController
 
     public function qr(Event $event): JsonResponse
     {
-        $this->authorize('view', $event);
+        $this->authorize('update', $event);
 
         return $this->success('QR invitation loaded', new QrCodeResource($this->events->ensureQrCode($event)));
     }

@@ -249,7 +249,15 @@ export default function RSVPSettingsScreen() {
                         }}
                         placeholder="Select date"
                         minimumDate={new Date()}
-                        maximumDate={eventStartDate}
+                        maximumDate={
+                          eventStartDate
+                            ? new Date(
+                              new Date(eventStartDate).setDate(
+                                new Date(eventStartDate).getDate() - 1
+                              )
+                            )
+                            : undefined
+                        }
                       />
                     </View>
 

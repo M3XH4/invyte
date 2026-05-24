@@ -14,6 +14,9 @@ class ThemeResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'thumbnail' => $this->thumbnail,
+            'category_id' => $this->category_id,
+            'category_slug' => $this->category?->slug,
+            'category' => new CategoryResource($this->whenLoaded('category')),
             'config' => $this->config ?? [],
         ];
     }

@@ -23,6 +23,7 @@ class EventMetadataController extends ApiController
     public function themes(): JsonResponse
     {
         $themes = Theme::query()
+            ->with('category')
             ->orderBy('name')
             ->get();
 

@@ -19,12 +19,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { useScreenTheme } from "@/hooks/use-screen-theme";
 import { useAuth } from "@/hooks/useAuth";
 import { eventStore, useEventStore } from "@/store/eventStore";
+import { guestEventStore, useGuestEventStore } from "@/store/guestEventStore";
 import type { Event } from "@/types/event";
 import { formatDateForDisplay, formatTimeForDisplay } from "@/utils/dateTime";
+import { getEventComputedStatus } from "@/utils/eventStatus";
+import { mergeUserEvents } from "@/utils/mergeUserEvents";
 import { normalizeEventRsvpStats } from "@/utils/rsvpStats";
 
 const fallbackCover =
   "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=900&q=80";
+
+type EventFilter = 'all' | 'hosted' | 'guest' | 'upcoming' | 'ongoing' | 'past' | 'archived';
 
 export default function MyEventsScreen() {
   const router = useRouter();
@@ -34,18 +39,28 @@ export default function MyEventsScreen() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<
-    'all' | 'upcoming' | 'ongoing' | 'past' | 'archived'
-  >('all');
+  const [statusFilter, setStatusFilter] = useState<EventFilter>('all');
 
   const eventsState = useEventStore();
+  const guestEventState = useGuestEventStore();
   const loading = eventsState.isLoadingInitial && eventsState.events.length === 0;
   const refreshing = eventsState.isRefreshing;
   const error = eventsState.error;
-  const refresh = () =>
-    statusFilter === 'archived'
-      ? eventStore.refreshEvents({ status: 'archived', per_page: 50 })
-      : eventStore.refreshEvents({ status: 'all', per_page: 50 });
+  const refresh = async () => {
+    if (statusFilter === 'archived') {
+      await eventStore.refreshEvents({ status: 'archived', per_page: 50 });
+      return;
+    }
+
+    await Promise.all([
+      eventStore.refreshEvents({ status: 'all', per_page: 50 }),
+      guestEventStore.fetchGuestEvents().catch((error) => {
+        if (typeof __DEV__ === 'undefined' || __DEV__) {
+          console.log('[events] failed to refresh guest events', error?.message || error);
+        }
+      }),
+    ]);
+  };
 
   useEffect(() => {
     if (statusFilter === 'archived') {
@@ -57,10 +72,29 @@ export default function MyEventsScreen() {
     }
   }, [statusFilter]);
 
+  useEffect(() => {
+    if (!isAuthenticated || guestEventState.loaded || guestEventState.loading) return;
+
+    guestEventStore.fetchGuestEvents().catch((error) => {
+      if (typeof __DEV__ === 'undefined' || __DEV__) {
+        console.log('[events] failed to load guest-side events', error?.message || error);
+      }
+    });
+  }, [guestEventState.loaded, guestEventState.loading, isAuthenticated]);
+
   const events = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    const source = statusFilter === 'archived' ? eventsState.archivedEvents : eventsState.events;
+    const mergedEvents = mergeUserEvents(eventsState.events, guestEventState.events);
+
+    const source =
+      statusFilter === 'archived'
+        ? eventsState.archivedEvents.map((event) => ({ ...event, relationshipRole: 'host' as const }))
+        : statusFilter === 'hosted'
+          ? mergedEvents.filter((event) => event.relationshipRole === 'host')
+          : statusFilter === 'guest'
+            ? mergedEvents.filter((event) => event.relationshipRole === 'guest')
+            : mergedEvents;
 
     return source.filter((event) => {
       const matchesSearch =
@@ -68,11 +102,16 @@ export default function MyEventsScreen() {
         event.title.toLowerCase().includes(query) ||
         categorySlug(event).toLowerCase().includes(query) ||
         (event.location || event.venue_name || event.venue_address || '').toLowerCase().includes(query);
-      const matchesStatus = statusFilter === 'all' || statusFilter === 'archived' || event.status === statusFilter;
+      const computedStatus = getEventComputedStatus(event);
+      const matchesStatus =
+        statusFilter === 'all' ||
+        statusFilter === 'hosted' ||
+        statusFilter === 'guest' ||
+        computedStatus === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
-  }, [eventsState.archivedEvents, eventsState.events, searchQuery, statusFilter]);
+  }, [eventsState.archivedEvents, eventsState.events, guestEventState.events, searchQuery, statusFilter]);
 
   const handleRestoreEvent = async (eventId: string) => {
     await eventStore.restoreEvent(eventId);
@@ -180,7 +219,7 @@ export default function MyEventsScreen() {
             />
             <StatsCard
               label="Upcoming"
-              value={events.filter((e) => e.status === "upcoming").length}
+              value={events.filter((e) => getEventComputedStatus(e) === "upcoming").length}
               color="#059669"
             />
             <StatsCard
@@ -214,15 +253,16 @@ export default function MyEventsScreen() {
 
           {showFilters && (
             <View className={`mb-5 rounded-2xl border p-1.5 shadow-sm ${theme.surface}`}>
-              <View className="flex-row gap-1">
-                {['all', 'upcoming', 'ongoing', 'past', 'archived'].map((status) => {
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View className="flex-row gap-2 px-1">
+                {(['all', 'hosted', 'guest', 'upcoming', 'ongoing', 'past', 'archived'] as EventFilter[]).map((status) => {
                   const active = statusFilter === status;
 
                   return (
                     <Pressable
                       key={status}
                       onPress={() => setStatusFilter(status as any)}
-                      className={`flex-1 rounded-xl py-2 ${active ? 'bg-purple-600' : ''
+                      className={`min-w-[92px] rounded-xl px-4 py-2 ${active ? 'bg-purple-600' : ''
                         }`}
                     >
                       <Text
@@ -235,6 +275,7 @@ export default function MyEventsScreen() {
                   );
                 })}
               </View>
+              </ScrollView>
             </View>
           )}
           {/* Events List */}
@@ -268,7 +309,7 @@ export default function MyEventsScreen() {
           <View className="gap-4">
             {events.map((event, index) => (
               <MotiView
-                key={event.id}
+                key={`${event.relationshipRole || 'host'}-${event.uuid || event.id}`}
                 from={{ opacity: 0, translateY: 20 }}
                 animate={{ opacity: 1, translateY: 0 }}
                 transition={{
@@ -303,7 +344,12 @@ export default function MyEventsScreen() {
 
                     <View className="absolute left-3 top-3 flex-row items-center gap-2">
                       <Badge
-                        label={statusFilter === 'archived' || event.is_archived ? 'Archived' : capitalize(event.status)}
+                        label={event.relationshipRole === 'guest' ? 'Invited' : 'Host'}
+                        bg={event.relationshipRole === 'guest' ? '#e0f2fe' : '#f3e8ff'}
+                        text={event.relationshipRole === 'guest' ? '#0369a1' : '#7e22ce'}
+                      />
+                      <Badge
+                        label={capitalize(getEventComputedStatus(event))}
                         bg="#f3e8ff"
                         text="#7e22ce"
                       />
@@ -314,7 +360,7 @@ export default function MyEventsScreen() {
                       />
                     </View>
 
-                    {event.status === "upcoming" && (
+                    {getEventComputedStatus(event) === "upcoming" && (
                       <View className="absolute right-3 top-3 rounded-xl border border-white/40 bg-white/20 px-3 py-2">
                         <Text className="text-center text-2xl font-black leading-none text-white">
                           {calculateDaysUntil(event.date || event.start_date || '')}
@@ -408,7 +454,7 @@ export default function MyEventsScreen() {
                       </View>
                     </View>
 
-                    {statusFilter === 'archived' || event.is_archived ? (
+                    {getEventComputedStatus(event) === 'archived' && event.relationshipRole !== 'guest' ? (
                       <View className="flex-row gap-3">
                         <Pressable
                           onPress={() => {

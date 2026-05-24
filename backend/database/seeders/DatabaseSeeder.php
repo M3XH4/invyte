@@ -20,9 +20,15 @@ class DatabaseSeeder extends Seeder
             ThemeSeeder::class,
         ]);
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        User::query()->updateOrCreate(
+            ['email' => 'admin@invyte.app'],
+            [
+                'name' => 'Admin User',
+                'username' => 'invyte_admin',
+                'role' => 'admin',
+                'password' => User::factory()->make()->password,
+                'email_verified_at' => now(),
+            ]
+        );
     }
 }

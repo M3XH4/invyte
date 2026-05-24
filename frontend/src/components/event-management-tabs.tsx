@@ -17,6 +17,7 @@ import {
   Edit3,
   Eye,
   HelpCircle,
+  Minus,
   Plus,
   QrCode,
   Save,
@@ -41,6 +42,7 @@ export function DetailsTab({
   onSave,
   onDelete,
   fieldErrors = {},
+  canEdit = true,
 }: any) {
   const theme = useScreenTheme();
 
@@ -50,7 +52,7 @@ export function DetailsTab({
         <View className="mb-4 flex-row items-center justify-between">
           <Text className={`text-lg font-black ${theme.headerText}`}>Event Details</Text>
 
-          {!isEditing ? (
+          {canEdit ? (!isEditing ? (
             <Pressable
               onPress={() => setIsEditing(true)}
               className={`flex-row items-center gap-2 rounded-xl px-4 py-2 ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}
@@ -76,7 +78,7 @@ export function DetailsTab({
                 <Text className="text-sm font-bold text-white">Save</Text>
               </Pressable>
             </View>
-          )}
+          )) : null}
         </View>
 
         <View className="gap-4">
@@ -158,13 +160,15 @@ export function DetailsTab({
         </View>
       </Card>
 
-      <Pressable
-        onPress={onDelete}
-        className={`flex-row items-center justify-center gap-2 rounded-[20px] border-2 px-5 py-4 ${theme.isDarkMode ? 'border-red-400/30 bg-red-500/10' : 'border-red-200 bg-red-50'}`}
-      >
-        <Trash2 color="#dc2626" size={20} />
-        <Text className={`text-sm font-black ${theme.isDarkMode ? 'text-red-200' : 'text-red-700'}`}>Move to Archive</Text>
-      </Pressable>
+      {canEdit && (
+        <Pressable
+          onPress={onDelete}
+          className={`flex-row items-center justify-center gap-2 rounded-[20px] border-2 px-5 py-4 ${theme.isDarkMode ? 'border-red-400/30 bg-red-500/10' : 'border-red-200 bg-red-50'}`}
+        >
+          <Trash2 color="#dc2626" size={20} />
+          <Text className={`text-sm font-black ${theme.isDarkMode ? 'text-red-200' : 'text-red-700'}`}>Move to Archive</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -365,6 +369,8 @@ export function GuestsTab({
   onAddGuest,
   onDeleteGuest,
   onOpenGuest,
+  canAddGuest = true,
+  canRemoveGuest = true,
 }: any) {
   const theme = useScreenTheme();
   const safeGuests = Array.isArray(guests) ? guests : [];
@@ -391,17 +397,19 @@ export function GuestsTab({
           />
         </View>
 
-        <Pressable
-          onPress={onAddGuest}
-          className="overflow-hidden rounded-2xl"
-        >
-          <LinearGradient
-            colors={['#9333ea', '#ec4899']}
-            className="h-12 w-12 items-center justify-center"
+        {canAddGuest && (
+          <Pressable
+            onPress={onAddGuest}
+            className="overflow-hidden rounded-2xl"
           >
-            <UserPlus color="white" size={20} />
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={['#9333ea', '#ec4899']}
+              className="h-12 w-12 items-center justify-center"
+            >
+              <UserPlus color="white" size={20} />
+            </LinearGradient>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -451,7 +459,7 @@ export function GuestsTab({
               key={guest.id}
               guest={guest}
               onPress={() => onOpenGuest?.(guest)}
-              onDelete={() => onDeleteGuest(guest.id)}
+              onDelete={canRemoveGuest ? () => onDeleteGuest(guest.id) : undefined}
             />
           ))
         )}
@@ -466,6 +474,7 @@ export function AttendanceTab({
   loaded,
   attendedCount,
   onUpdateAttendance,
+  canManageAttendance = true,
 }: any) {
   const theme = useScreenTheme();
   const safeGuests = Array.isArray(guests) ? guests : [];
@@ -527,22 +536,28 @@ export function AttendanceTab({
                   </Text>
                 </View>
 
-                <Pressable
-                  onPress={() => onUpdateAttendance(guest.id, false)}
-                  className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
-                >
-                  <X color="#dc2626" size={16} />
-                </Pressable>
+                {canManageAttendance && (
+                  <Pressable
+                    onPress={() => onUpdateAttendance(guest.id, false)}
+                    className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
+                  >
+                    <X color="#dc2626" size={16} />
+                  </Pressable>
+                )}
               </View>
             ) : (
-              <Pressable
-                onPress={() => onUpdateAttendance(guest.id, true)}
-                className={`rounded-lg px-4 py-2 ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}
-              >
-                <Text className={`text-xs font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
-                  Check In
-                </Text>
-              </Pressable>
+              canManageAttendance ? (
+                <Pressable
+                  onPress={() => onUpdateAttendance(guest.id, true)}
+                  className={`rounded-lg px-4 py-2 ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}
+                >
+                  <Text className={`text-xs font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                    Check In
+                  </Text>
+                </Pressable>
+              ) : (
+                <Text className={`text-xs font-bold ${theme.subText}`}>Not checked in</Text>
+              )
             )}
           </View>
         ))}
@@ -699,13 +714,157 @@ function GuestCard({ guest, onDelete, onPress }: any) {
           </View>
         </Pressable>
 
-        <Pressable
-          onPress={onDelete}
-          className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
-        >
-          <Trash2 color="#dc2626" size={16} />
-        </Pressable>
+        {!!onDelete && (
+          <Pressable
+            onPress={onDelete}
+            className={`h-9 w-9 items-center justify-center rounded-lg ${theme.isDarkMode ? 'bg-red-500/10' : 'bg-red-50'}`}
+          >
+            <Trash2 color="#dc2626" size={16} />
+          </Pressable>
+        )}
       </View>
+    </View>
+  );
+}
+
+export function MyRsvpTab({
+  event,
+  guest,
+  questions = [],
+  editing,
+  setEditing,
+  status,
+  setStatus,
+  plusOnes,
+  setPlusOnes,
+  answers,
+  setAnswers,
+  canUpdate,
+  onSave,
+}: any) {
+  const theme = useScreenTheme();
+  const maxCompanions = Math.max(1, Number(event?.max_companions || 1));
+  const allowPlusOnes = !!event?.allow_plus_ones;
+  const safeQuestions = Array.isArray(questions) ? questions : [];
+
+  return (
+    <View className="gap-4">
+      <Card>
+        <View className="mb-4 flex-row items-center justify-between">
+          <View>
+            <Text className={`text-lg font-black ${theme.headerText}`}>My RSVP</Text>
+            <Text className={`text-xs font-semibold ${theme.subText}`}>
+              {canUpdate ? 'You can update your response before RSVP closes.' : 'This RSVP is read-only.'}
+            </Text>
+          </View>
+          {canUpdate && (
+            <Pressable
+              onPress={() => setEditing(!editing)}
+              className={`rounded-xl px-4 py-2 ${theme.isDarkMode ? 'bg-white/5' : 'bg-purple-50'}`}
+            >
+              <Text className={`text-sm font-bold ${theme.isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                {editing ? 'Cancel' : 'Edit'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+
+        {editing ? (
+          <View className="gap-4">
+            <View className="gap-2">
+              {[
+                { value: 'going', label: 'Going', icon: CheckCircle, color: '#059669' },
+                { value: 'maybe', label: 'Maybe', icon: HelpCircle, color: '#d97706' },
+                { value: 'not_going', label: "Can't Go", icon: XCircle, color: '#dc2626' },
+              ].map((option) => {
+                const Icon = option.icon;
+                const active = status === option.value;
+
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setStatus(option.value)}
+                    className={`flex-row items-center gap-3 rounded-xl border p-3 ${active ? 'border-purple-400 bg-purple-500/15' : `${theme.divider} ${theme.surfaceMuted}`}`}
+                  >
+                    <Icon color={option.color} size={18} />
+                    <Text className={`text-sm font-black ${theme.textOnSurface}`}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {status === 'going' && allowPlusOnes && (
+              <View className={`rounded-xl p-3 ${theme.surfaceMuted}`}>
+                <Text className={`mb-3 text-sm font-black ${theme.textOnSurface}`}>Plus one</Text>
+                <View className="flex-row gap-2">
+                  <Pressable
+                    onPress={() => setPlusOnes(0)}
+                    className={`h-11 flex-1 items-center justify-center rounded-xl ${plusOnes === 0 ? 'bg-purple-600' : theme.surface}`}
+                  >
+                    <Text className={`text-sm font-bold ${plusOnes === 0 ? 'text-white' : theme.textOnSurface}`}>No plus one</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setPlusOnes(Math.max(1, plusOnes || 1))}
+                    className={`h-11 flex-1 items-center justify-center rounded-xl ${plusOnes > 0 ? 'bg-purple-600' : theme.surface}`}
+                  >
+                    <Text className={`text-sm font-bold ${plusOnes > 0 ? 'text-white' : theme.textOnSurface}`}>Bringing one</Text>
+                  </Pressable>
+                </View>
+
+                {plusOnes > 0 && maxCompanions > 1 && (
+                  <View className="mt-3 flex-row items-center justify-between">
+                    <Pressable
+                      onPress={() => setPlusOnes(Math.max(1, plusOnes - 1))}
+                      className={`h-9 w-9 items-center justify-center rounded-lg ${theme.surface}`}
+                    >
+                      <Minus color={theme.iconColor} size={16} />
+                    </Pressable>
+                    <Text className={`text-base font-black ${theme.textOnSurface}`}>{plusOnes}</Text>
+                    <Pressable
+                      onPress={() => setPlusOnes(Math.min(maxCompanions, plusOnes + 1))}
+                      className={`h-9 w-9 items-center justify-center rounded-lg ${theme.surface}`}
+                    >
+                      <Plus color={theme.iconColor} size={16} />
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {safeQuestions.map((question: any) => (
+              <Field key={question.id} label={`${question.question}${question.required ? ' *' : ''}`}>
+                <Input
+                  value={answers[question.id] || ''}
+                  onChangeText={(value) => setAnswers({ ...answers, [question.id]: value })}
+                  placeholder={question.placeholder || 'Your answer'}
+                />
+              </Field>
+            ))}
+
+            <Pressable onPress={onSave} className="overflow-hidden rounded-[20px]">
+              <LinearGradient colors={['#9333ea', '#ec4899']} className="flex-row items-center justify-center gap-2 px-5 py-4">
+                <Save color="white" size={20} />
+                <Text className="text-sm font-black text-white">Save My RSVP</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        ) : (
+          <View className="gap-3">
+            <InfoRow label="Response" value={statusLabel(guest.response_status || guest.status)} />
+            <InfoRow label="Plus ones" value={String(guest.plus_ones ?? 0)} />
+            {(guest.answers || []).length > 0 && (
+              <View className={`rounded-xl p-3 ${theme.surfaceMuted}`}>
+                <Text className={`mb-2 text-sm font-black ${theme.textOnSurface}`}>Answers</Text>
+                {(guest.answers || []).map((answer: any, index: number) => (
+                  <Text key={answer.id || `${answer.question_id}-${index}`} className={`mb-1 text-xs font-semibold ${theme.subText}`}>
+                    {answer.question || 'Question'}: {answerValue(answer.answer)}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </Card>
     </View>
   );
 }
@@ -779,6 +938,32 @@ function ReadOnlyValue({ value, type }: { value: string; type: 'date' | 'time' }
       </Text>
     </View>
   );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  const theme = useScreenTheme();
+
+  return (
+    <View className={`flex-row items-center justify-between rounded-xl p-3 ${theme.surfaceMuted}`}>
+      <Text className={`text-sm font-semibold ${theme.subText}`}>{label}</Text>
+      <Text className={`text-sm font-black ${theme.textOnSurface}`}>{value}</Text>
+    </View>
+  );
+}
+
+function statusLabel(status?: string) {
+  if (status === 'going') return 'Going';
+  if (status === 'maybe') return 'Maybe';
+  if (status === 'not_going' || status === 'not-going' || status === 'cant_go') return "Can't Go";
+  return 'Pending';
+}
+
+function answerValue(answer: unknown) {
+  if (answer && typeof answer === 'object' && 'value' in answer) {
+    return String((answer as any).value ?? 'No answer');
+  }
+  if (answer === null || answer === undefined || answer === '') return 'No answer';
+  return typeof answer === 'string' ? answer : JSON.stringify(answer);
 }
 
 function getStatusConfig(status: string) {

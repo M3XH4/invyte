@@ -9,7 +9,15 @@ class EventPolicy
 {
     public function view(User $user, Event $event): bool
     {
-        return $this->owns($user, $event);
+        return $this->owns($user, $event) || $event->guests()
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+
+                if ($user->email) {
+                    $query->orWhere('email', $user->email);
+                }
+            })
+            ->exists();
     }
 
     public function update(User $user, Event $event): bool
@@ -39,6 +47,6 @@ class EventPolicy
 
     private function owns(User $user, Event $event): bool
     {
-        return $event->user_id === $user->id || $user->role === 'admin';
+        return (string) $event->user_id === (string) $user->id || $user->role === 'admin';
     }
 }

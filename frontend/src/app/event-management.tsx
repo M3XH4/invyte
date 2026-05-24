@@ -1,5 +1,5 @@
 // app/event-management.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -29,6 +29,7 @@ import {
   AttendanceTab,
   UpdatesTab,
   DeleteModal,
+  MyRsvpTab,
 } from '@/components/event-management-tabs';
 import AddGuestModal from '@/components/add-guest-modal';
 import GuestDetailsModal from '@/components/guest-details-modal';
@@ -40,6 +41,7 @@ import { rsvpApi } from '@/api/rsvpApi';
 import { useEvent } from '@/hooks/useEvents';
 import { useGuests } from '@/hooks/useGuests';
 import { eventStore } from '@/store/eventStore';
+import { guestEventStore } from '@/store/guestEventStore';
 import { guestStore } from '@/store/guestStore';
 import { activityLogStore, useActivityLogStore } from '@/store/activityLogStore';
 import { safeRun } from '@/utils/safeRun';
@@ -57,7 +59,7 @@ import { normalizeGuestStatus } from '@/utils/rsvpStats';
 import type { RSVPQuestion } from '@/types/rsvp';
 import type { EventGuest } from '@/types/guest';
 
-type TabType = 'details' | 'rsvp' | 'guests' | 'attendance' | 'updates';
+type TabType = 'details' | 'rsvp' | 'guests' | 'attendance' | 'updates' | 'my-rsvp';
 
 export default function EventManagementScreen() {
   const router = useRouter();
@@ -111,6 +113,10 @@ export default function EventManagementScreen() {
   const [selectedGuestStatus, setSelectedGuestStatus] = useState<'going' | 'maybe' | 'pending' | 'not-going'>('pending');
   const [contactMethod, setContactMethod] = useState<'email' | 'whatsapp' | 'messenger' | 'telegram'>('email');
   const [contactValue, setContactValue] = useState('');
+  const [myRsvpEditing, setMyRsvpEditing] = useState(false);
+  const [myRsvpStatus, setMyRsvpStatus] = useState<'going' | 'maybe' | 'not_going'>('going');
+  const [myRsvpPlusOnes, setMyRsvpPlusOnes] = useState(0);
+  const [myRsvpAnswers, setMyRsvpAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!event) return;
@@ -136,6 +142,22 @@ export default function EventManagementScreen() {
     });
 
     setRsvpQuestions(event.questions || []);
+
+    if (event.guest) {
+      const status = normalizeGuestStatus(event.guest.response_status || event.guest.status);
+      setMyRsvpStatus(status === 'not_going' ? 'not_going' : (status as 'going' | 'maybe'));
+      setMyRsvpPlusOnes(Number(event.guest.plus_ones || 0));
+      setMyRsvpAnswers(
+        (event.guest.answers || []).reduce<Record<string, string>>((answers, answer) => {
+          if (!answer.question_id) return answers;
+          const value = answer.answer && typeof answer.answer === 'object' && 'value' in answer.answer
+            ? (answer.answer as any).value
+            : answer.answer;
+          answers[answer.question_id] = value ? String(value) : '';
+          return answers;
+        }, {}),
+      );
+    }
   }, [event]);
 
   useEffect(() => {
@@ -157,13 +179,34 @@ export default function EventManagementScreen() {
     loadExtra();
   }, [eventId]);
 
-  const tabs: { id: TabType; label: string }[] = [
-    { id: 'details', label: 'Details' },
-    { id: 'rsvp', label: 'RSVP' },
-    { id: 'guests', label: 'Guests' },
-    { id: 'attendance', label: 'Attendance' },
-    { id: 'updates', label: 'Updates' },
-  ];
+  const permissions = event?.permissions || {};
+  const canManageEvent = permissions.role === 'host' || permissions.role === 'admin' || permissions.can_edit_event === true;
+  const canViewGuestList = canManageEvent || permissions.can_view_guest_list !== false;
+
+  const tabs = useMemo(() => {
+    const allTabs: { id: TabType; label: string }[] = [
+      { id: 'details', label: 'Details' },
+      { id: 'rsvp', label: 'RSVP' },
+      { id: 'guests', label: 'Guests' },
+      { id: 'attendance', label: 'Attendance' },
+      { id: 'updates', label: 'Updates' },
+      { id: 'my-rsvp', label: 'My RSVP' },
+    ];
+
+    return allTabs.filter((tab) => {
+      if (tab.id === 'rsvp' || tab.id === 'updates') return canManageEvent;
+      if (tab.id === 'attendance') return canManageEvent;
+      if (tab.id === 'guests') return canViewGuestList;
+      if (tab.id === 'my-rsvp') return !canManageEvent && permissions.can_view_own_rsvp !== false && !!event?.guest;
+      return true;
+    });
+  }, [canManageEvent, canViewGuestList, event?.guest, permissions.can_view_own_rsvp]);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab('details');
+    }
+  }, [activeTab, tabs]);
 
   const showSuccessToast = (message: string) => {
     setToastMessage(message);
@@ -456,6 +499,41 @@ export default function EventManagementScreen() {
     }
   };
 
+  const handleUpdateOwnRsvp = async () => {
+    if (!eventId || !event) return;
+
+    try {
+      setScreenError('');
+      const response = await guestEventStore.updateOwnRsvp(eventId, {
+        response_status: myRsvpStatus,
+        plus_ones: myRsvpStatus === 'going' ? myRsvpPlusOnes : 0,
+        answers: Object.entries(myRsvpAnswers).map(([question_id, answer]) => ({ question_id, answer })),
+      });
+
+      setEvent({
+        ...event,
+        guest: response.guest,
+        permissions: {
+          ...event.permissions,
+          ...(response.permissions || {}),
+        },
+      });
+      const currentGuests = guestStore.getSnapshot().guestsByEventId[eventId] ?? [];
+      if (currentGuests.length > 0) {
+        guestStore.hydrateGuests(
+          eventId,
+          currentGuests.map((guest) =>
+            (guest.uuid || guest.id) === (response.guest.uuid || response.guest.id) ? response.guest : guest,
+          ),
+        );
+      }
+      setMyRsvpEditing(false);
+      showSuccessToast('Your RSVP was updated');
+    } catch (error: any) {
+      setScreenError(error.message || 'Unable to update your RSVP.');
+    }
+  };
+
   const handleOpenGuestDetails = async (guest: EventGuest) => {
     setSelectedGuestDetails(guest);
     if (!eventId) return;
@@ -519,15 +597,19 @@ export default function EventManagementScreen() {
             </Pressable>
 
             <Text className={`text-xl font-black ${theme.headerText}`}>
-              Event Management
+              {canManageEvent ? 'Event Management' : 'Event Details'}
             </Text>
 
-            <Pressable
-              onPress={() => router.push({ pathname: '/event-management-settings', params: { eventId } })}
-              className={`h-11 w-11 items-center justify-center rounded-2xl border shadow-sm ${theme.iconButton}`}
-            >
-              <MoreVertical color={theme.iconColor} size={20} />
-            </Pressable>
+            {canManageEvent ? (
+              <Pressable
+                onPress={() => router.push({ pathname: '/event-management-settings', params: { eventId } })}
+                className={`h-11 w-11 items-center justify-center rounded-2xl border shadow-sm ${theme.iconButton}`}
+              >
+                <MoreVertical color={theme.iconColor} size={20} />
+              </Pressable>
+            ) : (
+              <View className="h-11 w-11" />
+            )}
           </View>
 
           {(eventLoading || guestsLoading) && (
@@ -560,16 +642,18 @@ export default function EventManagementScreen() {
               colors={eventDetails.coverImage ? ['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.78)'] : ['#a855f7', '#9333ea', '#ec4899']}
               className="min-h-[190px] justify-end p-5"
             >
-              <Pressable
-                onPress={() => {
-                  void safeRun(handleChangeCover, 'Unable to update cover.', showActionError);
-                }}
-                disabled={saving}
-                className="absolute right-4 top-4 flex-row items-center gap-2 rounded-full bg-black/35 px-3 py-2"
-              >
-                <Camera color="white" size={16} />
-                <Text className="text-xs font-black text-white">Change Cover</Text>
-              </Pressable>
+              {canManageEvent && (
+                <Pressable
+                  onPress={() => {
+                    void safeRun(handleChangeCover, 'Unable to update cover.', showActionError);
+                  }}
+                  disabled={saving}
+                  className="absolute right-4 top-4 flex-row items-center gap-2 rounded-full bg-black/35 px-3 py-2"
+                >
+                  <Camera color="white" size={16} />
+                  <Text className="text-xs font-black text-white">Change Cover</Text>
+                </Pressable>
+              )}
 
               <Text className="mb-1 text-2xl font-black text-white">
                 {eventDetails.title}
@@ -594,6 +678,18 @@ export default function EventManagementScreen() {
               </View>
             </LinearGradient>
           </View>
+
+          {!canManageEvent && event?.guest && activeTab !== 'my-rsvp' && (
+            <View className={`mb-6 rounded-[24px] border p-4 ${theme.surface}`}>
+              <Text className={`mb-2 text-sm font-black ${theme.textOnSurface}`}>My RSVP</Text>
+              <Text className={`text-sm font-semibold ${theme.subText}`}>
+                Status: {formatGuestStatus(event.guest.response_status || event.guest.status)}
+              </Text>
+              <Text className={`mt-1 text-sm font-semibold ${theme.subText}`}>
+                Plus ones: {event.guest.plus_ones ?? 0}
+              </Text>
+            </View>
+          )}
 
           <View className={`mb-6 rounded-[24px] border p-1.5 ${theme.surface}`}>
             <View className="flex-row gap-1">
@@ -642,6 +738,7 @@ export default function EventManagementScreen() {
                 setDeleteTarget({ type: 'event' });
                 setShowDeleteModal(true);
               }}
+              canEdit={canManageEvent}
             />
           )}
 
@@ -681,10 +778,12 @@ export default function EventManagementScreen() {
               onAddGuest={() => {
                 setShowAddGuestModal(true);
               }}
+              canAddGuest={canManageEvent && permissions.can_add_guest !== false}
               onDeleteGuest={(id: string) => {
                 setDeleteTarget({ type: 'guest', id });
                 setShowDeleteModal(true);
               }}
+              canRemoveGuest={canManageEvent && permissions.can_remove_guest !== false}
               onOpenGuest={handleOpenGuestDetails}
             />
           )}
@@ -696,16 +795,38 @@ export default function EventManagementScreen() {
               loaded={eventId ? !!guestStore.getSnapshot().loadedByEventId[eventId] : false}
               attendedCount={guestStats.attended}
               onUpdateAttendance={(id: string, attended: boolean) => {
+                if (!canManageEvent) return;
                 void safeRun(async () => {
                   if (!eventId) throw new Error('Event not found.');
                   await guestStore.updateAttendance(eventId, id, attended);
                   showSuccessToast(attended ? 'Guest checked in' : 'Attendance reset');
                 }, 'Failed to update attendance.', showActionError);
               }}
+              canManageAttendance={canManageEvent && permissions.can_manage_attendance !== false}
             />
           )}
 
           {activeTab === 'updates' && <UpdatesTab logs={activityLog} loading={activityLoading} />}
+
+          {activeTab === 'my-rsvp' && event?.guest && (
+            <MyRsvpTab
+              event={event}
+              guest={event.guest}
+              questions={rsvpQuestions}
+              editing={myRsvpEditing}
+              setEditing={setMyRsvpEditing}
+              status={myRsvpStatus}
+              setStatus={setMyRsvpStatus}
+              plusOnes={myRsvpPlusOnes}
+              setPlusOnes={setMyRsvpPlusOnes}
+              answers={myRsvpAnswers}
+              setAnswers={setMyRsvpAnswers}
+              canUpdate={!!event.permissions?.can_update_own_rsvp}
+              onSave={() => {
+                void safeRun(handleUpdateOwnRsvp, 'Unable to update your RSVP.', showActionError);
+              }}
+            />
+          )}
         </View>
       </ScrollView>
 
@@ -718,6 +839,7 @@ export default function EventManagementScreen() {
         }}
       />
 
+      {canManageEvent && (
       <AddGuestModal
         visible={showAddGuestModal}
         onClose={() => setShowAddGuestModal(false)}
@@ -742,12 +864,14 @@ export default function EventManagementScreen() {
           void safeRun(handleAddGuest, 'Failed to add guest.', showActionError);
         }}
       />
+      )}
 
       <GuestDetailsModal
         visible={!!selectedGuestDetails}
         guest={selectedGuestDetails}
         event={event}
         loading={guestDetailsLoading}
+        canViewPrivate={event?.permissions?.can_view_guest_answers !== false}
         onClose={() => setSelectedGuestDetails(null)}
       />
 
@@ -773,4 +897,12 @@ export default function EventManagementScreen() {
 function normalizeStatus(status?: string) {
   const normalized = normalizeGuestStatus(status);
   return normalized === 'not_going' ? 'not-going' : normalized;
+}
+
+function formatGuestStatus(status?: string) {
+  const normalized = normalizeStatus(status);
+  if (normalized === 'going') return 'Going';
+  if (normalized === 'maybe') return 'Maybe';
+  if (normalized === 'not-going') return "Can't Go";
+  return 'Pending';
 }

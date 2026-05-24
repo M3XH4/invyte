@@ -15,6 +15,9 @@ export type Theme = {
   slug: string;
   thumbnail?: string | null;
   config?: Record<string, unknown>;
+  category_id?: string | null;
+  category_slug?: string | null;
+  category?: EventCategory | string | null;
 };
 
 export type QRCodePayload = {
@@ -81,6 +84,27 @@ export type Event = {
   qr?: QRCodePayload | null;
   public_url?: string | null;
   qr_value?: string | null;
+  host?: {
+    name?: string | null;
+  } | null;
+  guest?: EventGuest | null;
+  permissions?: {
+    role?: 'host' | 'guest' | 'admin' | 'public' | string;
+    can_view_details?: boolean;
+    can_view_guest_list?: boolean;
+    can_edit_event?: boolean;
+    can_open_settings?: boolean;
+    can_add_guest?: boolean;
+    can_remove_guest?: boolean;
+    can_archive_event?: boolean;
+    can_delete_event?: boolean;
+    can_restore_event?: boolean;
+    can_manage_attendance?: boolean;
+    can_view_own_rsvp?: boolean;
+    can_update_own_rsvp?: boolean;
+    can_view_guest_answers?: boolean;
+  };
+  max_companions?: number | null;
   guests?: EventGuest[];
   questions?: RSVPQuestion[];
   rsvp: EventRsvpCounts;

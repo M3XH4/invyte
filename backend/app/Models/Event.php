@@ -124,17 +124,65 @@ class Event extends Model
 
     public function scopeTimelineStatus(Builder $query, ?string $status): Builder
     {
+        $today = now()->toDateString();
+        $time = now()->format('H:i:s');
+
         return match ($status) {
-            'upcoming' => $query->whereDate('start_date', '>', now()->toDateString()),
+            'upcoming' => $query
+                ->whereNull('archived_at')
+                ->where(function (Builder $query) use ($today, $time) {
+                    $query->whereDate('start_date', '>', $today)
+                        ->orWhere(function (Builder $query) use ($today, $time) {
+                            $query->whereDate('start_date', $today)
+                                ->where('start_time', '>', $time);
+                        });
+                }),
             'ongoing' => $query
-                ->whereDate('start_date', '<=', now()->toDateString())
-                ->where(function (Builder $query) {
-                    $query->whereNull('end_date')->orWhereDate('end_date', '>=', now()->toDateString());
+                ->whereNull('archived_at')
+                ->whereNotNull('end_date')
+                ->where(function (Builder $query) use ($today, $time) {
+                    $query->whereDate('start_date', '<', $today)
+                        ->orWhere(function (Builder $query) use ($today, $time) {
+                            $query->whereDate('start_date', $today)
+                                ->where('start_time', '<=', $time);
+                        });
+                })
+                ->where(function (Builder $query) use ($today, $time) {
+                    $query->whereDate('end_date', '>', $today)
+                        ->orWhere(function (Builder $query) use ($today, $time) {
+                            $query->whereDate('end_date', $today)
+                                ->where(function (Builder $query) use ($time) {
+                                    $query->whereNull('end_time')
+                                        ->orWhere('end_time', '>=', $time);
+                                });
+                        });
                 }),
             'past' => $query->where(function (Builder $query) {
-                $query->whereDate('end_date', '<', now()->toDateString())
-                    ->orWhere(function (Builder $query) {
-                        $query->whereNull('end_date')->whereDate('start_date', '<', now()->toDateString());
+                $today = now()->toDateString();
+                $time = now()->format('H:i:s');
+
+                $query->whereNull('archived_at')
+                    ->where(function (Builder $query) use ($today, $time) {
+                        $query->where(function (Builder $query) use ($today, $time) {
+                            $query->whereNotNull('end_date')
+                                ->where(function (Builder $query) use ($today, $time) {
+                                    $query->whereDate('end_date', '<', $today)
+                                        ->orWhere(function (Builder $query) use ($today, $time) {
+                                            $query->whereDate('end_date', $today)
+                                                ->whereNotNull('end_time')
+                                                ->where('end_time', '<', $time);
+                                        });
+                                });
+                        })->orWhere(function (Builder $query) use ($today, $time) {
+                            $query->whereNull('end_date')
+                                ->where(function (Builder $query) use ($today, $time) {
+                                    $query->whereDate('start_date', '<', $today)
+                                        ->orWhere(function (Builder $query) use ($today, $time) {
+                                            $query->whereDate('start_date', $today)
+                                                ->where('start_time', '<', $time);
+                                        });
+                                });
+                        });
                     });
             }),
             'archived' => $query->whereNotNull('archived_at'),
@@ -149,8 +197,11 @@ class Event extends Model
         }
 
         $start = Carbon::parse($this->start_date->toDateString().' '.($this->start_time ?? '00:00:00'));
-        $endDate = $this->end_date ?: $this->start_date;
-        $end = Carbon::parse($endDate->toDateString().' '.($this->end_time ?? '23:59:59'));
+        if (! $this->end_date) {
+            return now()->lt($start) ? 'upcoming' : 'past';
+        }
+
+        $end = Carbon::parse($this->end_date->toDateString().' '.($this->end_time ?? '23:59:59'));
 
         return match (true) {
             now()->lt($start) => 'upcoming',

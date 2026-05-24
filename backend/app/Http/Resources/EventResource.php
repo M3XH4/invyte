@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Services\EventPermissionService;
 
 class EventResource extends JsonResource
 {
@@ -16,6 +17,21 @@ class EventResource extends JsonResource
         $totalInvited = (int) ($this->guests_count ?? $this->guests()->count());
         $responseRate = $totalInvited > 0 ? (int) round((($going + $maybe + $notGoing) / $totalInvited) * 100) : 0;
         $publicUrl = $this->qrCode?->url ?: rtrim((string) config('app.frontend_url', config('app.url')), '/').'/public-rsvp/'.$this->slug;
+        $permissions = app(EventPermissionService::class)->forUser($this->resource, $request->user());
+        $viewerGuest = null;
+
+        if (($permissions['role'] ?? null) === 'guest' && $request->user()) {
+            $viewerGuest = $this->guests()
+                ->where(function ($query) use ($request) {
+                    $query->where('user_id', $request->user()->id);
+
+                    if ($request->user()->email) {
+                        $query->orWhere('email', $request->user()->email);
+                    }
+                })
+                ->with('answers.question')
+                ->first();
+        }
 
         return [
             'id' => $this->id,
@@ -24,6 +40,10 @@ class EventResource extends JsonResource
             'user_id' => $this->user_id,
             'created_by' => $this->user_id,
             'creator' => new UserResource($this->whenLoaded('host')),
+            'host' => [
+                'name' => $this->host?->name,
+            ],
+            'guest' => $viewerGuest ? new EventGuestResource($viewerGuest) : null,
             'title' => $this->title,
             'description' => $this->description,
             'cover_image' => $this->cover_image,
@@ -47,6 +67,7 @@ class EventResource extends JsonResource
             'dress_code' => $this->dress_code,
             'food_option' => $this->food_option,
             'max_guests' => $this->max_guests,
+            'max_companions' => $this->max_companions ?? null,
             'rsvp_enabled' => $this->rsvp_enabled,
             'allow_plus_ones' => $this->allow_plus_ones,
             'allow_guest_invites' => $this->allow_guest_invites,
@@ -75,6 +96,7 @@ class EventResource extends JsonResource
             'totalInvited' => $totalInvited,
             'responseRate' => $responseRate,
             'response_rate' => $responseRate,
+            'permissions' => $permissions,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

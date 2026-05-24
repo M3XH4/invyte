@@ -61,6 +61,7 @@ class EventService
                 'category:id,name,slug,icon,color',
                 'theme:id,name,slug,thumbnail,config',
                 'qrCode:id,event_id,code,url,payload,scan_count',
+                'host:id,name',
             ])
             ->search($filters['search'] ?? null)
             ->timelineStatus($filters['status'] ?? 'all');
@@ -136,7 +137,7 @@ class EventService
 
             $this->ensureQrCode($event);
 
-            return $event->load(['category', 'theme', 'qrCode', 'questions']);
+            return $event->load(['category', 'theme', 'qrCode', 'questions', 'host']);
         });
     }
 
@@ -163,7 +164,7 @@ class EventService
                 ['event_id' => $event->id, 'slug' => $event->slug]
             );
 
-            return $event->refresh()->load(['category', 'theme', 'qrCode', 'questions', 'guests']);
+            return $event->refresh()->load(['category', 'theme', 'qrCode', 'questions', 'guests', 'host']);
         });
     }
 
@@ -179,7 +180,7 @@ class EventService
             $event
         );
 
-        return $event->refresh()->load(['category', 'theme', 'qrCode']);
+        return $event->refresh()->load(['category', 'theme', 'qrCode', 'host']);
     }
 
     public function restore(Event $event): Event
@@ -194,7 +195,7 @@ class EventService
             $event
         );
 
-        return $event->refresh()->load(['category', 'theme', 'qrCode']);
+        return $event->refresh()->load(['category', 'theme', 'qrCode', 'host']);
     }
 
     public function forceDelete(Event $event): void
@@ -230,7 +231,7 @@ class EventService
 
             $this->ensureQrCode($copy);
 
-            return $copy->load(['category', 'theme', 'qrCode', 'questions', 'media']);
+            return $copy->load(['category', 'theme', 'qrCode', 'questions', 'media', 'host']);
         });
     }
 

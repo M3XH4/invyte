@@ -12,10 +12,11 @@ type Props = {
   guest?: EventGuest | null;
   event?: Event | null;
   loading?: boolean;
+  canViewPrivate?: boolean;
   onClose: () => void;
 };
 
-export default function GuestDetailsModal({ visible, guest, event, loading, onClose }: Props) {
+export default function GuestDetailsModal({ visible, guest, event, loading, canViewPrivate = true, onClose }: Props) {
   const theme = useScreenTheme();
   const answers = Array.isArray(guest?.answers) ? guest.answers : [];
   const relatedEvent = event || guest?.event;
@@ -57,7 +58,7 @@ export default function GuestDetailsModal({ visible, guest, event, loading, onCl
               <View className="gap-4">
                 <View className={`rounded-[24px] border p-4 ${theme.surface}`}>
                   <Text className={`mb-1 text-2xl font-black ${theme.textOnSurface}`}>{guest.name}</Text>
-                  {!!guest.email && (
+                  {canViewPrivate && !!guest.email && (
                     <View className="mt-2 flex-row items-center gap-2">
                       <Mail color={theme.chevronColor} size={15} />
                       <Text className={`text-sm font-semibold ${theme.subText}`}>{guest.email}</Text>
@@ -78,28 +79,32 @@ export default function GuestDetailsModal({ visible, guest, event, loading, onCl
                   </View>
                 )}
 
-                <View className={`rounded-[24px] border p-4 ${theme.surface}`}>
-                  <Text className={`mb-3 text-base font-black ${theme.textOnSurface}`}>Timeline</Text>
-                  <Info icon={Clock} label="Invited" value={formatDateTimeForDisplay(guest.invited_at || '') || 'Not sent'} />
-                  <Info icon={CheckCircle} label="Responded" value={formatDateTimeForDisplay(guest.responded_at || '') || 'No response yet'} />
-                  <Info icon={Users} label="Attendance" value={guest.checked_in_at ? formatCheckedInAt(guest.checked_in_at) : 'Not checked in'} />
-                </View>
+                {canViewPrivate && (
+                  <>
+                    <View className={`rounded-[24px] border p-4 ${theme.surface}`}>
+                      <Text className={`mb-3 text-base font-black ${theme.textOnSurface}`}>Timeline</Text>
+                      <Info icon={Clock} label="Invited" value={formatDateTimeForDisplay(guest.invited_at || '') || 'Not sent'} />
+                      <Info icon={CheckCircle} label="Responded" value={formatDateTimeForDisplay(guest.responded_at || '') || 'No response yet'} />
+                      <Info icon={Users} label="Attendance" value={guest.checked_in_at ? formatCheckedInAt(guest.checked_in_at) : 'Not checked in'} />
+                    </View>
 
-                <View className={`rounded-[24px] border p-4 ${theme.surface}`}>
-                  <Text className={`mb-3 text-base font-black ${theme.textOnSurface}`}>RSVP Answers</Text>
-                  {answers.length === 0 ? (
-                    <Text className={`text-sm font-semibold ${theme.subText}`}>No custom answers yet.</Text>
-                  ) : (
-                    answers.map((answer, index) => (
-                      <View key={answer.id || `${answer.question_id}-${index}`} className={`mb-3 rounded-2xl p-3 ${theme.surfaceMuted}`}>
-                        <Text className={`mb-1 text-xs font-black uppercase ${theme.subText}`}>
-                          {answer.question || 'Question'}
-                        </Text>
-                        <Text className={`text-sm font-bold ${theme.textOnSurface}`}>{answerValue(answer.answer)}</Text>
-                      </View>
-                    ))
-                  )}
-                </View>
+                    <View className={`rounded-[24px] border p-4 ${theme.surface}`}>
+                      <Text className={`mb-3 text-base font-black ${theme.textOnSurface}`}>RSVP Answers</Text>
+                      {answers.length === 0 ? (
+                        <Text className={`text-sm font-semibold ${theme.subText}`}>No custom answers yet.</Text>
+                      ) : (
+                        answers.map((answer, index) => (
+                          <View key={answer.id || `${answer.question_id}-${index}`} className={`mb-3 rounded-2xl p-3 ${theme.surfaceMuted}`}>
+                            <Text className={`mb-1 text-xs font-black uppercase ${theme.subText}`}>
+                              {answer.question || 'Question'}
+                            </Text>
+                            <Text className={`text-sm font-bold ${theme.textOnSurface}`}>{answerValue(answer.answer)}</Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  </>
+                )}
               </View>
             </ScrollView>
           )}

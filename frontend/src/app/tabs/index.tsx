@@ -10,7 +10,10 @@ import { useScreenTheme } from '@/hooks/use-screen-theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useNotifications } from '@/hooks/useNotifications';
 import { eventStore, useEventStore } from '@/store/eventStore';
+import { guestEventStore, useGuestEventStore } from '@/store/guestEventStore';
 import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
+import { getEventComputedStatus } from '@/utils/eventStatus';
+import { mergeUserEvents } from '@/utils/mergeUserEvents';
 import ScanQrFab from '@/components/scan-qr-fab';
 const heroCardImage = require('@/assets/images/hero-card-image.png');
 const birthdayTransIcon = require('@/assets/images/transparent-birthday-icon.png');
@@ -27,6 +30,7 @@ type EventItem = {
   location: string;
   attendees: number;
   image?: any;
+  role?: string;
 };
 
 const fallbackCategories = [
@@ -42,20 +46,20 @@ export default function HomeScreen() {
   const theme = useScreenTheme();
   const { user } = useAuth();
   const eventState = useEventStore();
+  const guestEventState = useGuestEventStore();
   const { unreadCount } = useNotifications();
 
   const categories = fallbackCategories;
 
   useEffect(() => {
     eventStore.syncIfStale({ status: 'all', per_page: 50 }).catch(() => undefined);
-  }, []);
+    if (user) guestEventStore.fetchGuestEvents().catch(() => undefined);
+  }, [user]);
 
   const upcomingEvents: EventItem[] = useMemo(() => {
-    const upcoming = eventState.events.filter((event) => {
-      if (event.status === 'upcoming') return true;
-      const date = event.start_date || event.date;
-      const time = event.start_time || event.time || '00:00';
-      return date ? new Date(`${date}T${String(time).slice(0, 5)}:00`).getTime() > Date.now() : false;
+    const mergedEvents = mergeUserEvents(eventState.events, guestEventState.events);
+    const upcoming = mergedEvents.filter((event) => {
+      return getEventComputedStatus(event) === 'upcoming';
     });
 
     return upcoming
@@ -67,6 +71,7 @@ export default function HomeScreen() {
       .slice(0, 5)
       .map((event) => ({
         id: event.uuid || event.id,
+        role: event.relationshipRole === 'guest' ? 'Invited' : 'Hosted',
         title: event.title,
         date: event.date || event.start_date || 'Date TBD',
         dateISO: event.date || event.start_date || new Date().toISOString(),
@@ -74,7 +79,7 @@ export default function HomeScreen() {
         location: event.location || event.venue_name || event.venue_address || 'Location TBD',
         attendees: event.rsvp?.going ?? 0,
       }));
-  }, [eventState.events]);
+  }, [eventState.events, guestEventState.events]);
 
   const notificationsCount = unreadCount;
 
@@ -135,7 +140,10 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={eventState.isRefreshing}
             onRefresh={() => {
-              void eventStore.refreshEvents({ status: 'all', per_page: 50 }).catch((error) => {
+              void Promise.all([
+                eventStore.refreshEvents({ status: 'all', per_page: 50 }),
+                user ? guestEventStore.fetchGuestEvents() : Promise.resolve([]),
+              ]).catch((error) => {
                 if (typeof __DEV__ === 'undefined' || __DEV__) {
                   console.log('[home] refresh failed; keeping existing hero/events', error?.message || error);
                 }
@@ -234,7 +242,7 @@ export default function HomeScreen() {
                 <View className="absolute left-5 top-6 z-10 w-[170px]">
                   <View className="mb-2 self-start rounded-full bg-white/25 px-3 py-1">
                     <Text className="text-[11px] font-black text-white">
-                      {latestUpcomingEvent ? 'UPCOMING EVENT' : 'GET STARTED'}
+                      {latestUpcomingEvent ? `${latestUpcomingEvent.role || 'Hosted'} EVENT` : 'GET STARTED'}
                     </Text>
                   </View>
 
@@ -405,6 +413,9 @@ export default function HomeScreen() {
                             className={`mb-1 text-base font-bold ${theme.textOnSurface}`}
                           >
                             {event.title}
+                          </Text>
+                          <Text className={`mb-1 text-[10px] font-black uppercase ${event.role === 'Invited' ? 'text-sky-500' : 'text-purple-500'}`}>
+                            {event.role || 'Hosted'}
                           </Text>
 
                           <View className="mb-1 flex-row items-center gap-2">
