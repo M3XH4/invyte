@@ -12,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { guestEventStore } from '@/store/guestEventStore';
 import { formatDateForDisplay, formatDateTimeForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 import { getEventComputedStatus, isEventRsvpOpen } from '@/utils/eventStatus';
+import { resolveMediaUrl } from '@/utils/media';
 import type { Event } from '@/types/event';
 import type { EventGuest } from '@/types/guest';
 
@@ -184,7 +185,7 @@ export default function PublicRsvpScreen() {
           ) : event ? (
             <>
               <MotiView from={{ opacity: 0, translateY: 12 }} animate={{ opacity: 1, translateY: 0 }} className="mb-6 overflow-hidden rounded-[30px]">
-                <Image source={{ uri: event.coverImage || event.cover_image || fallbackCover }} className="h-56 w-full" resizeMode="cover" />
+                <Image source={{ uri: resolveMediaUrl(event.coverImage || event.cover_image) || fallbackCover }} className="h-56 w-full" resizeMode="cover" />
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.82)']} className="absolute inset-0 justify-end p-5">
                   <Text className="text-3xl font-black text-white">{event.title}</Text>
                   <View className="mt-3 gap-2">

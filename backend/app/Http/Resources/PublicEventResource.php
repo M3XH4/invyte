@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use App\Services\EventPermissionService;
+use App\Support\MediaUrl;
 
 class PublicEventResource extends JsonResource
 {
@@ -19,8 +20,8 @@ class PublicEventResource extends JsonResource
             'slug' => $this->slug,
             'title' => $this->title,
             'description' => $this->description,
-            'cover_image' => $this->cover_image,
-            'coverImage' => $this->cover_image,
+            'cover_image' => MediaUrl::publicUrl($this->cover_image_path ?: $this->cover_image),
+            'coverImage' => MediaUrl::publicUrl($this->cover_image_path ?: $this->cover_image),
             'start_date' => $this->start_date?->toDateString(),
             'date' => $this->start_date?->toDateString(),
             'start_time' => $this->start_time,

@@ -13,6 +13,7 @@ import { eventStore, useEventStore } from '@/store/eventStore';
 import { guestEventStore, useGuestEventStore } from '@/store/guestEventStore';
 import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
 import { getEventComputedStatus } from '@/utils/eventStatus';
+import { resolveMediaUrl } from '@/utils/media';
 import { mergeUserEvents } from '@/utils/mergeUserEvents';
 import ScanQrFab from '@/components/scan-qr-fab';
 const heroCardImage = require('@/assets/images/hero-card-image.png');
@@ -166,7 +167,7 @@ export default function HomeScreen() {
               >
                 <Image
                   source={{
-                    uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
+                    uri: resolveMediaUrl(user?.avatar) || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
                   }}
                   className="h-14 w-14 rounded-full"
                 />

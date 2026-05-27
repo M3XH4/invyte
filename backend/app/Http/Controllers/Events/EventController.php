@@ -58,9 +58,14 @@ class EventController extends ApiController
     {
         $this->authorize('update', $event);
 
+        if ($event->cover_image_path) {
+            Storage::disk('public')->delete($event->cover_image_path);
+        }
+
         $path = $request->file('cover')->store('event-covers', 'public');
         $event = $this->events->update($event, [
-            'cover_image' => $request->getSchemeAndHttpHost().Storage::url($path),
+            'cover_image' => Storage::disk('public')->url($path),
+            'cover_image_path' => $path,
         ]);
 
         return $this->success('Event cover updated successfully', new EventResource($event));

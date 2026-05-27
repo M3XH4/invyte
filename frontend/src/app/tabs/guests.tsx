@@ -29,6 +29,7 @@ import { guestEventStore, useGuestEventStore } from '@/store/guestEventStore';
 import { guestStore, useGuestStore } from '@/store/guestStore';
 import { safeRun } from '@/utils/safeRun';
 import { mergeUserEvents } from '@/utils/mergeUserEvents';
+import { resolveMediaUrl } from '@/utils/media';
 import { normalizeGuestStatus } from '@/utils/rsvpStats';
 import type { EventGuest } from '@/types/guest';
 import type { Event } from '@/types/event';
@@ -624,7 +625,7 @@ function GuestRow({
     >
       <Pressable onPress={onPress} className="flex-row items-center gap-3">
         {guest.profileImage ? (
-          <Image source={{ uri: guest.profileImage }} className="h-10 w-10 rounded-lg" />
+          <Image source={{ uri: resolveMediaUrl(guest.profileImage) || guest.profileImage }} className="h-10 w-10 rounded-lg" />
         ) : (
           <LinearGradient colors={guest.color} className="h-10 w-10 items-center justify-center rounded-lg">
             <Text className="text-xs font-black text-white">{guest.avatar}</Text>

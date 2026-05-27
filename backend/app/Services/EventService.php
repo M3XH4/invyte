@@ -33,6 +33,7 @@ class EventService
                 'title',
                 'description',
                 'cover_image',
+                'cover_image_path',
                 'start_date',
                 'start_time',
                 'end_date',

@@ -55,6 +55,7 @@ import {
   splitApiDateTime,
 } from '@/utils/dateTime';
 import { imageUriToFormData } from '@/utils/upload';
+import { resolveMediaUrl, withCacheBust } from '@/utils/media';
 import { normalizeGuestStatus } from '@/utils/rsvpStats';
 import type { RSVPQuestion } from '@/types/rsvp';
 import type { EventGuest } from '@/types/guest';
@@ -129,7 +130,7 @@ export default function EventManagementScreen() {
       venue: event.location || event.venue_address || '',
       description: event.description || 'No description added yet.',
       theme: typeof event.theme === 'string' ? event.theme : event.theme?.name || 'Default Theme',
-      coverImage: event.coverImage || event.cover_image || '',
+      coverImage: resolveMediaUrl(event.coverImage || event.cover_image) || '',
     });
 
     const deadline = splitApiDateTime(event.rsvp_deadline);
@@ -429,7 +430,7 @@ export default function EventManagementScreen() {
       );
       setEvent(updated);
       eventStore.updateEvent(updated);
-      setEventDetails((prev) => ({ ...prev, coverImage: updated.coverImage || updated.cover_image || asset.uri }));
+      setEventDetails((prev) => ({ ...prev, coverImage: withCacheBust(updated.coverImage || updated.cover_image) || asset.uri }));
       showSuccessToast('Cover updated successfully');
     } catch (error: any) {
       if (typeof __DEV__ === 'undefined' || __DEV__) {

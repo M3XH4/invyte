@@ -22,6 +22,7 @@ import { useScreenTheme } from '@/hooks/use-screen-theme';
 import { profileApi, type ProfileStats } from '@/api/profileApi';
 import { useAuth } from '@/hooks/useAuth';
 import { buildAchievements } from '@/utils/achievements';
+import { resolveMediaUrl } from '@/utils/media';
 import type { Achievement } from '@/types/achievement';
 
 export default function ProfileScreen() {
@@ -98,7 +99,7 @@ export default function ProfileScreen() {
                   <View className="absolute left-5 right-5 top-5 z-10 flex-row items-start gap-4">
                     <View className="relative">
                       <Image
-                        source={{ uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte') }}
+                        source={{ uri: resolveMediaUrl(user?.avatar) || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte') }}
                         className="h-16 w-16 rounded-full"
                       />
 

@@ -1,4 +1,4 @@
-import { API_BASE_URL, api } from './axios';
+import { API_BASE_URL, api, apiClient } from './axios';
 import type { PaginatedResponse } from '@/types/api';
 import type { ActivityLog, Event, EventCategory, EventFilters, EventPayload, QRCodePayload, Theme } from '@/types/event';
 import type { RSVPQuestion } from '@/types/rsvp';
@@ -74,11 +74,18 @@ export const eventsApi = {
   },
 
   updateCover(eventId: string, payload: FormData) {
+    if (!eventId || eventId.includes('{')) {
+      throw new Error('Event ID is required before uploading a cover image.');
+    }
+
+    const finalBaseUrl = String(apiClient.defaults.baseURL || API_BASE_URL).replace(/\/$/, '');
+
     if (typeof __DEV__ === 'undefined' || __DEV__) {
       console.log('[eventsApi.uploadCover]', {
         eventId,
-        baseURL: API_BASE_URL,
-        url: `${API_BASE_URL}/events/${eventId}/cover`,
+        configuredBaseURL: API_BASE_URL,
+        activeBaseURL: apiClient.defaults.baseURL,
+        url: `${finalBaseUrl}/events/${eventId}/cover`,
         isFormData: typeof FormData !== 'undefined' && payload instanceof FormData,
       });
     }

@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Support\MediaUrl;
 
 class GuestEventResource extends JsonResource
 {
@@ -35,8 +36,8 @@ class GuestEventResource extends JsonResource
             'slug' => $event->slug,
             'title' => $event->title,
             'description' => $event->description,
-            'cover_image' => $event->cover_image,
-            'coverImage' => $event->cover_image,
+            'cover_image' => MediaUrl::publicUrl($event->cover_image_path ?: $event->cover_image),
+            'coverImage' => MediaUrl::publicUrl($event->cover_image_path ?: $event->cover_image),
             'start_date' => $event->start_date?->toDateString(),
             'date' => $event->start_date?->toDateString(),
             'start_time' => $event->start_time,

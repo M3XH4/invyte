@@ -23,6 +23,7 @@ import { guestEventStore, useGuestEventStore } from "@/store/guestEventStore";
 import type { Event } from "@/types/event";
 import { formatDateForDisplay, formatTimeForDisplay } from "@/utils/dateTime";
 import { getEventComputedStatus } from "@/utils/eventStatus";
+import { resolveMediaUrl } from "@/utils/media";
 import { mergeUserEvents } from "@/utils/mergeUserEvents";
 import { normalizeEventRsvpStats } from "@/utils/rsvpStats";
 
@@ -332,7 +333,7 @@ export default function MyEventsScreen() {
                   {/* Event Header */}
                   <View className="relative h-32 overflow-hidden">
                     <Image
-                      source={{ uri: event.coverImage || event.cover_image || fallbackCover }}
+                      source={{ uri: resolveMediaUrl(event.coverImage || event.cover_image) || fallbackCover }}
                       className="h-full w-full"
                       resizeMode="cover"
                     />

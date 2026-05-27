@@ -10,6 +10,8 @@ import { profileApi } from '@/api/profileApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useScreenTheme } from '@/hooks/use-screen-theme';
 import { authStore } from '@/store/authStore';
+import { resolveMediaUrl, withCacheBust } from '@/utils/media';
+import { imageUriToFormData } from '@/utils/upload';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -20,7 +22,7 @@ export default function EditProfileScreen() {
   const [username, setUsername] = useState(user?.username || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [phone, setPhone] = useState(user?.phone_number || '');
-  const [avatar, setAvatar] = useState(user?.avatar || '');
+  const [avatar, setAvatar] = useState(resolveMediaUrl(user?.avatar) || '');
   const [avatarAsset, setAvatarAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -59,20 +61,13 @@ export default function EditProfileScreen() {
       });
 
       if (avatarAsset) {
-        const formData = new FormData();
-        const filename = avatarAsset.fileName || `profile-${Date.now()}.jpg`;
-        const mimeType = avatarAsset.mimeType || 'image/jpeg';
-
-        formData.append('avatar', {
-          uri: avatarAsset.uri,
-          name: filename,
-          type: mimeType,
-        } as any);
-
-        updated = await profileApi.updateAvatar(formData);
+        updated = await profileApi.uploadAvatar(
+          imageUriToFormData('avatar', avatarAsset.uri, avatarAsset.fileName || `avatar-${Date.now()}.jpg`, avatarAsset.mimeType || undefined),
+        );
       }
 
       await authStore.setUser(updated);
+      setAvatar(withCacheBust(updated.avatar) || avatar);
       setMessage('Profile saved.');
       setAvatarAsset(null);
     } catch (error: any) {
@@ -90,7 +85,7 @@ export default function EditProfileScreen() {
 
           <View className={`items-center rounded-[24px] border p-5 ${theme.surface}`}>
             <Image
-              source={{ uri: avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name || 'Invyte') }}
+              source={{ uri: resolveMediaUrl(avatar) || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(name || 'Invyte') }}
               className="mb-4 h-20 w-20 rounded-full"
             />
             <Pressable onPress={choosePhoto} className={`mb-5 flex-row items-center gap-2 rounded-2xl border px-4 py-3 ${theme.surfaceMuted}`}>

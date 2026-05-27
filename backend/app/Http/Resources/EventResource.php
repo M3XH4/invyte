@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use App\Services\EventPermissionService;
+use App\Support\MediaUrl;
 
 class EventResource extends JsonResource
 {
@@ -18,6 +19,7 @@ class EventResource extends JsonResource
         $responseRate = $totalInvited > 0 ? (int) round((($going + $maybe + $notGoing) / $totalInvited) * 100) : 0;
         $publicUrl = $this->qrCode?->url ?: rtrim((string) config('app.frontend_url', config('app.url')), '/').'/public-rsvp/'.$this->slug;
         $permissions = app(EventPermissionService::class)->forUser($this->resource, $request->user());
+        $coverImage = MediaUrl::publicUrl($this->cover_image_path ?: $this->cover_image);
         $viewerGuest = null;
 
         if (($permissions['role'] ?? null) === 'guest' && $request->user()) {
@@ -46,8 +48,8 @@ class EventResource extends JsonResource
             'guest' => $viewerGuest ? new EventGuestResource($viewerGuest) : null,
             'title' => $this->title,
             'description' => $this->description,
-            'cover_image' => $this->cover_image,
-            'coverImage' => $this->cover_image,
+            'cover_image' => $coverImage,
+            'coverImage' => $coverImage,
             'start_date' => $this->start_date?->toDateString(),
             'date' => $this->start_date?->toDateString(),
             'start_time' => $this->start_time,

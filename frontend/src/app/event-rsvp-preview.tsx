@@ -31,6 +31,7 @@ import { useScreenTheme } from '@/hooks/use-screen-theme';
 import { eventsApi } from '@/api/eventsApi';
 import type { Event } from '@/types/event';
 import { formatDateForDisplay, formatTimeForDisplay } from '@/utils/dateTime';
+import { resolveMediaUrl } from '@/utils/media';
 
 const fallbackCover =
   'https://www.magicjumprentals.com/clients/3/assets/girl_birthday_party.jpg';
@@ -109,7 +110,7 @@ export default function RSVPPreviewScreen() {
       event?.location || event?.venue_address || 'Event location',
     description:
       event?.description || "Let's celebrate and make awesome memories together!",
-    coverImage: event?.coverImage || event?.cover_image || fallbackCover,
+    coverImage: resolveMediaUrl(event?.coverImage || event?.cover_image) || fallbackCover,
     organizer: 'Host',
   };
 

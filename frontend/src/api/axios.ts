@@ -16,14 +16,20 @@ let unauthorizedHandler: (() => void | Promise<void>) | null = null;
 let workingBaseUrl: string | null = null;
 
 function normalizeApiBaseUrl(url?: string | null) {
-  const normalized = (url || DEFAULT_API_URL).replace(/\/$/, '');
+  let normalized = (url || DEFAULT_API_URL).trim().replace(/\/+$/, '');
 
   if (
     typeof __DEV__ !== 'undefined' &&
     __DEV__ &&
-    /:800\/api$/.test(normalized)
+    /:800($|\/)/.test(normalized)
   ) {
-    return normalized.replace(':800/api', ':8000/api');
+    normalized = normalized.replace(/:800($|\/)/, ':8000$1');
+  }
+
+  normalized = normalized.replace(/\/api\/api$/i, '/api');
+
+  if (!/\/api$/i.test(normalized)) {
+    normalized = `${normalized}/api`;
   }
 
   return normalized;

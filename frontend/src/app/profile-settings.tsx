@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '@/context/theme-context';
 import { useAuth } from '@/hooks/useAuth';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { resolveMediaUrl } from '@/utils/media';
 import { getPreference } from '@/utils/preferences';
 
 export default function ProfileSettingsScreen() {
@@ -179,7 +180,7 @@ export default function ProfileSettingsScreen() {
               <View className="z-10 flex-row items-center gap-4">
                 <Image
                   source={{
-                    uri: user?.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
+                    uri: resolveMediaUrl(user?.avatar) || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user?.name || 'Invyte'),
                   }}
                   className="h-14 w-14 rounded-full"
                 />

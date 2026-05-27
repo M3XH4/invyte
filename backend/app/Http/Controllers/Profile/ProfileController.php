@@ -26,12 +26,17 @@ class ProfileController extends ApiController
     public function avatar(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'avatar' => ['required', 'image', 'max:4096'],
+            'avatar' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
+
+        if ($request->user()->avatar_path) {
+            Storage::disk('public')->delete($request->user()->avatar_path);
+        }
 
         $path = $validated['avatar']->store('avatars', 'public');
         $request->user()->update([
-            'avatar' => $request->getSchemeAndHttpHost().Storage::url($path),
+            'avatar' => Storage::disk('public')->url($path),
+            'avatar_path' => $path,
         ]);
 
         return $this->success('Profile photo updated successfully', new UserResource($request->user()->refresh()));
