@@ -9,6 +9,7 @@ return [
     'allowed_origins' => [
         'https://invyte-mxke.onrender.com',
         'http://localhost:5173',
+        'https://invyte-zri6.onrender.com'
     ],
 
     'allowed_headers' => ['*'],
