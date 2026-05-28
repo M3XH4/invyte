@@ -2,13 +2,25 @@
 
 namespace App\Models\Concerns;
 
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Support\Str;
 
 trait HasUuidPrimaryKey
 {
-    use HasUuids;
+    protected static function bootHasUuidPrimaryKey(): void
+    {
+        static::creating(function ($model) {
+            if (! $model->getKey()) {
+                $model->{$model->getKeyName()} = (string) Str::uuid();
+            }
+        });
+    }
+    public function getIncrementing(): bool
+    {
+        return false;
+    }
 
-    public $incrementing = false;
-
-    protected $keyType = 'string';
+    public function getKeyType(): string
+    {
+        return 'string';
+    }
 }
