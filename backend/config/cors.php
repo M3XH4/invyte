@@ -6,7 +6,10 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'https://invyte-mxke.onrender.com',
+        'http://localhost:5173',
+    ],
 
     'allowed_headers' => ['*'],
 
