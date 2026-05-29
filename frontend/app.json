@@ -18,7 +18,11 @@
         "monochromeImage": "./assets/images/icon-invyte.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.invyte"
+      "package": "com.anonymous.invyte",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -57,6 +61,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "879f6f82-0c2c-4cf6-94c4-23f1d3d33f55"
+      }
     }
   }
 }

@@ -3,14 +3,13 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-
 import { ApiError, type ApiResponse } from '@/types/api';
 
 export const ACCESS_TOKEN_KEY = 'invyte_access_token';
 export const REMEMBER_TOKEN_KEY = 'invyte_remember_token';
 export const USER_CACHE_KEY = 'invyte_auth_user';
 const LEGACY_TOKEN_KEY = 'invyte_sanctum_token';
-const DEFAULT_API_URL = 'http://127.0.0.1:8000/api';
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://invyte-mxke.onrender.com/api';
 
 let unauthorizedHandler: (() => void | Promise<void>) | null = null;
 let workingBaseUrl: string | null = null;

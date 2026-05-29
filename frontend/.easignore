@@ -1,0 +1,8 @@
+backend/
+admin/
+.git/
+node_modules/
+
+backend/**
+admin/**
+web/**
